@@ -16,7 +16,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="斩仙台短剧一键生成",
+    title="ai-video-generator",
     description="输入题材/风格/时长 → GPT 剧本 → TTS → 文生图 → FFmpeg 剪辑 → 成片",
     lifespan=lifespan,
 )
