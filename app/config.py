@@ -33,6 +33,19 @@ class Settings(BaseSettings):
     sd_cfg_scale: float = 7.0
     sd_sampler_name: str = "DPM++ 2M Karras"
 
+    # 画面来源：images（文生图+拼视频）| cogvideox（ComfyUI CogVideoXWrapper 文生视频片段）
+    visual_mode: str = "images"  # images | cogvideox
+
+    # ComfyUI（visual_mode=cogvideox 时用于 CogVideoX）
+    comfyui_base_url: str = "http://127.0.0.1:8188"
+    cogvideox_workflow_path: str = ""
+    cogvideox_prompt_node_id: str = ""
+    cogvideox_negative_node_id: str = ""
+    cogvideox_negative_default: str = (
+        "lowres, bad anatomy, blurry, watermark, text, worst quality, jpeg artifacts"
+    )
+    cogvideox_randomize_seed: bool = True
+
     # 路径
     output_dir: str = "./output"
     temp_dir: str = "./temp"

@@ -11,7 +11,7 @@
         ↓
   TTS 生成配音（OpenAI / 内部 API）
         ↓
-  文生图（每镜一图：OpenAI DALL·E 或本地 SD WebUI）
+  文生图 / 文生视频（每镜一图或 ComfyUI CogVideoX 每镜一段）
         ↓
   FFmpeg：图序列 + 配音 + SRT 字幕 + 可选 BGM
         ↓
@@ -47,6 +47,9 @@ cp .env.example .env
 | `SD_STEPS` / `SD_WIDTH` / `SD_HEIGHT` | 采样步数、分辨率（竖屏建议 512×768） |
 | `OUTPUT_DIR` | 成片输出目录，默认 `./output` |
 | `TEMP_DIR` | 临时文件，默认 `./temp` |
+| `VISUAL_MODE` | `images`（默认）或 `cogvideox`（ComfyUI CogVideoX） |
+| `COMFYUI_BASE_URL` | ComfyUI API，默认 `http://127.0.0.1:8188` |
+| `COGVIDEOX_WORKFLOW_PATH` | CogVideoX 的 API 格式 workflow JSON 绝对路径 |
 
 ## 运行
 
@@ -110,7 +113,26 @@ Content-Type: application/json
 
 4. 再调 `POST /api/generate_short_drama`，出图会走 `POST /sdapi/v1/txt2img`，无需 OpenAI 图像 Key。
 
-**说明**：ComfyUI、InvokeAI 等需另接 API；当前实现对接的是 **A1111 标准 txt2img**。若 WebUI 开了登录或 `--api-auth`，需在 `SD_WEBUI_BASE_URL` 里带 Basic 认证或我们后续再加请求头配置。
+**说明**：若 WebUI 开了登录或 `--api-auth`，需在 `SD_WEBUI_BASE_URL` 里带 Basic 认证或我们后续再加请求头配置。
+
+---
+
+## 文生视频：ComfyUI + CogVideoXWrapper（本地）
+
+使用 **[ComfyUI-CogVideoXWrapper](https://github.com/kijai/ComfyUI-CogVideoXWrapper)** 在本地 ComfyUI 中生成 **每镜一段短视频**，再与 TTS、字幕拼接。
+
+1. 按 **`docs/cogvideox_local_deploy.md`** 安装 ComfyUI、克隆扩展、下载模型，在界面跑通后 **导出 API 格式** workflow JSON。
+2. `.env` 设置：
+
+   ```env
+   VISUAL_MODE=cogvideox
+   COMFYUI_BASE_URL=http://127.0.0.1:8188
+   COGVIDEOX_WORKFLOW_PATH=/你的路径/cogvideox_api.json
+   ```
+
+3. 若提示词未写入正确节点，配置 `COGVIDEOX_PROMPT_NODE_ID` / `COGVIDEOX_NEGATIVE_NODE_ID`（与 API JSON 中的 node id 一致）。
+
+详细步骤见 **`docs/cogvideox_local_deploy.md`**。
 
 ## 扩展
 
@@ -134,10 +156,13 @@ ai-video/
 │       ├── subtitle_service.py # 脚本 → SRT
 │       ├── tts_service.py      # TTS
 │       ├── image_service.py    # 文生图
-│       ├── video_service.py    # FFmpeg 剪辑
+│       ├── comfyui_cogvideox_service.py  # ComfyUI CogVideoX 文生视频
+│       ├── video_service.py    # FFmpeg 剪辑（含视频片段拼接）
 │       └── pipeline_service.py # 一键流水线
-├── output/                  # 成片（按 job_id 分目录）
-├── temp/                    # 临时文件
+├── docs/
+│   └── cogvideox_local_deploy.md  # CogVideoXWrapper 本地部署
+├── output/
+├── temp/
 ├── .env.example
 ├── requirements.txt
 └── README.md
