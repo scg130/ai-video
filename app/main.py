@@ -37,8 +37,8 @@ drama.register_static(app, settings.output_path)
 @app.get("/")
 async def root():
     return {
-        "message": "斩仙台短剧一键生成 API",
+        "message": "ai-video-generator API",
         "docs": "/docs",
         "post": "POST /api/generate_short_drama",
-        "body": {"theme": "斩仙台复仇", "style": "爽文", "duration": 60},
+        "body": {"theme": "example", "style": "example", "duration": 60},
     }
