@@ -11,7 +11,7 @@
         ↓
   TTS 生成配音（OpenAI / 内部 API）
         ↓
-  文生图 / 文生视频（每镜一图或 ComfyUI CogVideoX 每镜一段）
+  文生图 / 文生视频（每镜一图，或 ComfyUI：CogVideoX / AnimateDiff 每镜一段）
         ↓
   FFmpeg：图序列 + 配音 + SRT 字幕 + 可选 BGM
         ↓
@@ -47,9 +47,10 @@ cp .env.example .env
 | `SD_STEPS` / `SD_WIDTH` / `SD_HEIGHT` | 采样步数、分辨率（竖屏建议 512×768） |
 | `OUTPUT_DIR` | 成片输出目录，默认 `./output` |
 | `TEMP_DIR` | 临时文件，默认 `./temp` |
-| `VISUAL_MODE` | `images`（默认）或 `cogvideox`（ComfyUI CogVideoX） |
+| `VISUAL_MODE` | `images`（默认）、`cogvideox`、`animatediff`（后两者为 ComfyUI 文生视频） |
 | `COMFYUI_BASE_URL` | ComfyUI API，默认 `http://127.0.0.1:8188` |
-| `COGVIDEOX_WORKFLOW_PATH` | CogVideoX 的 API 格式 workflow JSON 绝对路径 |
+| `COGVIDEOX_WORKFLOW_PATH` | CogVideoX API workflow JSON 绝对路径 |
+| `ANIMATEDIFF_WORKFLOW_PATH` | AnimateDiff API workflow JSON 绝对路径 |
 
 ## 运行
 
@@ -134,6 +135,25 @@ Content-Type: application/json
 
 详细步骤见 **`docs/cogvideox_local_deploy.md`**。
 
+---
+
+## 文生视频：ComfyUI + AnimateDiff（本地）
+
+典型节点链：**Prompt → Load Checkpoint → AnimateDiff Loader → Sampler → Video Combine**（具体节点名随扩展版本而定）。
+
+1. 推荐安装 **[ComfyUI-AnimateDiff-Evolved](https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved)**（或你熟悉的 AnimateDiff 节点包），在界面跑通后 **导出 API** workflow。
+2. `.env`：
+
+   ```env
+   VISUAL_MODE=animatediff
+   COMFYUI_BASE_URL=http://127.0.0.1:8188
+   ANIMATEDIFF_WORKFLOW_PATH=/你的路径/animatediff_api.json
+   ```
+
+3. 提示词节点无法自动识别时，设置 `ANIMATEDIFF_PROMPT_NODE_ID` / `ANIMATEDIFF_NEGATIVE_NODE_ID`。
+
+详细步骤见 **`docs/animatediff_local_deploy.md`**。与 CogVideoX 共用 **`app/services/comfyui_common.py`**（ComfyUI API 调度）。
+
 ## 扩展
 
 - **TTS**：在 `app/services/tts_service.py` 中接 CosyVoice / GPT-SoVITS，按 `voice_id`、情绪区分角色。
@@ -156,11 +176,14 @@ ai-video/
 │       ├── subtitle_service.py # 脚本 → SRT
 │       ├── tts_service.py      # TTS
 │       ├── image_service.py    # 文生图
-│       ├── comfyui_cogvideox_service.py  # ComfyUI CogVideoX 文生视频
+│       ├── comfyui_common.py         # ComfyUI API 公共逻辑
+│       ├── comfyui_cogvideox_service.py
+│       ├── comfyui_animatediff_service.py  # AnimateDiff 文生视频
 │       ├── video_service.py    # FFmpeg 剪辑（含视频片段拼接）
 │       └── pipeline_service.py # 一键流水线
 ├── docs/
-│   └── cogvideox_local_deploy.md  # CogVideoXWrapper 本地部署
+│   ├── cogvideox_local_deploy.md
+│   └── animatediff_local_deploy.md
 ├── output/
 ├── temp/
 ├── .env.example

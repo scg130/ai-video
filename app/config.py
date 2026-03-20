@@ -33,10 +33,10 @@ class Settings(BaseSettings):
     sd_cfg_scale: float = 7.0
     sd_sampler_name: str = "DPM++ 2M Karras"
 
-    # 画面来源：images（文生图+拼视频）| cogvideox（ComfyUI CogVideoXWrapper 文生视频片段）
-    visual_mode: str = "images"  # images | cogvideox
+    # 画面来源：images | cogvideox | animatediff（后两者均为 ComfyUI 文生视频片段）
+    visual_mode: str = "images"  # images | cogvideox | animatediff
 
-    # ComfyUI（visual_mode=cogvideox 时用于 CogVideoX）
+    # ComfyUI（visual_mode=cogvideox / animatediff）
     comfyui_base_url: str = "http://127.0.0.1:8188"
     cogvideox_workflow_path: str = ""
     cogvideox_prompt_node_id: str = ""
@@ -45,6 +45,12 @@ class Settings(BaseSettings):
         "lowres, bad anatomy, blurry, watermark, text, worst quality, jpeg artifacts"
     )
     cogvideox_randomize_seed: bool = True
+
+    # AnimateDiff：Prompt → Checkpoint → AnimateDiff Loader → Sampler → Video Combine
+    animatediff_workflow_path: str = ""
+    animatediff_prompt_node_id: str = ""
+    animatediff_negative_node_id: str = ""
+    animatediff_randomize_seed: bool = True
 
     # 路径
     output_dir: str = "./output"
