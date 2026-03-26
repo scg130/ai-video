@@ -3,5 +3,6 @@ venv/
 output/
 temp/
 chroma_db/
+data/
 app/__pycache__/*
 app/services/__pycache__/*

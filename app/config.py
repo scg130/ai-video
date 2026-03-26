@@ -7,13 +7,49 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    # GPT
+    # GPT（OPENAI_API_KEY 单 Key；OPENAI_API_KEYS 多 Key，逗号/空格/换行分隔，与单 Key 二选一或合并列表）
     openai_api_key: str = ""
+    openai_api_keys: str = ""
+    openai_script_model: str = "gpt-4o-mini"
+
+    # 剧本：两步（大纲→分镜）+ 导演向 prompt
+    script_two_step: bool = True
+
+    # RAG / Chroma 系列记忆
+    rag_enabled: bool = True
+
+    # 画面 Prompt 后缀（文生图 / Comfy 共用）
+    visual_prompt_suffix: str = ""
+
+    # 成片分辨率（Ken Burns / xfade）
+    video_output_width: int = 720
+    video_output_height: int = 1280
+    ffmpeg_ken_burns: bool = True
+    ffmpeg_xfade: bool = True
+    ffmpeg_xfade_duration: float = 0.5
+    ffmpeg_fps: int = 24
+    # 抖音风字幕（ASS BGR + 边框）
+    ffmpeg_subtitle_style: str = (
+        "Fontsize=28,Bold=1,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,"
+        "Outline=3,Shadow=1,MarginV=40"
+    )
+
+    # 封面大字（爆款标题）
+    cover_promo_title: bool = True
+
+    # 任务队列：Celery + Redis（false 时用内存队列见 /api/jobs）
+    use_celery: bool = False
+    celery_broker_url: str = "redis://localhost:6379/0"
+    celery_result_backend: str = "redis://localhost:6379/0"
+
+    # 内存队列并发上限（USE_CELERY=false 时）；默认 1 = 用户请求入队后逐个处理
+    queue_max_concurrent: int = 1
 
     # TTS
     tts_base_url: str = ""
     tts_api_key: str = ""
     use_openai_tts: bool = True
+    tts_default_voice: str = "alloy"
 
     # 图像：openai（DALL·E）| sd_webui（本地 AUTOMATIC1111 --api）
     image_provider: str = "openai"  # openai | sd_webui
@@ -58,6 +94,9 @@ class Settings(BaseSettings):
 
     # Chroma
     chroma_persist_dir: str = "./chroma_db"
+
+    # SQLite 历史（视频墙）
+    database_url: str = "sqlite:///./data/videos.db"
 
     @property
     def output_path(self) -> Path:

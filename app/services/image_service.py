@@ -6,9 +6,8 @@ import httpx
 from openai import AsyncOpenAI
 
 from app.config import settings
-
-# 统一提示前缀：斩仙台风格，适合短视频竖屏
-STYLE_PREFIX = "古风修仙，斩仙台，电影质感，竖屏构图，高清，8k，中国风，短剧风格，"
+from app.services.openai_keys import async_run_with_key_rotation
+from app.services.visual_prompt import build_visual_prompt
 
 
 def _use_sd_webui() -> bool:
@@ -22,22 +21,26 @@ def _use_sd_webui() -> bool:
 
 
 async def _generate_image_openai(prompt: str, out_path: Path) -> None:
-    client = AsyncOpenAI(api_key=settings.openai_api_key)
-    full_prompt = STYLE_PREFIX + prompt
-    resp = await client.images.generate(
-        model="dall-e-3",
-        prompt=full_prompt[:4000],
-        size="1024x1792",
-        quality="standard",
-        n=1,
-    )
-    url = resp.data[0].url
-    if not url:
-        raise RuntimeError("OpenAI 未返回图片 URL")
-    async with httpx.AsyncClient() as client_http:
-        r = await client_http.get(url)
-        r.raise_for_status()
-        out_path.write_bytes(r.content)
+    full_prompt = prompt
+
+    async def _run(api_key: str) -> None:
+        client = AsyncOpenAI(api_key=api_key)
+        resp = await client.images.generate(
+            model="dall-e-3",
+            prompt=full_prompt[:4000],
+            size="1024x1792",
+            quality="standard",
+            n=1,
+        )
+        url = resp.data[0].url
+        if not url:
+            raise RuntimeError("OpenAI 未返回图片 URL")
+        async with httpx.AsyncClient() as client_http:
+            r = await client_http.get(url)
+            r.raise_for_status()
+            out_path.write_bytes(r.content)
+
+    await async_run_with_key_rotation(_run, what="OpenAI 文生图")
 
 
 async def _generate_image_sd_webui(prompt: str, out_path: Path) -> None:
@@ -48,7 +51,7 @@ async def _generate_image_sd_webui(prompt: str, out_path: Path) -> None:
     """
     base = (settings.sd_webui_base_url or "http://127.0.0.1:7860").rstrip("/")
     url = f"{base}/sdapi/v1/txt2img"
-    full_prompt = (STYLE_PREFIX + prompt)[:2000]
+    full_prompt = prompt[:2000]
     payload = {
         "prompt": full_prompt,
         "negative_prompt": settings.sd_negative_prompt[:2000],
@@ -82,12 +85,7 @@ async def generate_images_for_scenes(scenes: list[dict], out_dir: Path) -> list[
     gen = _generate_image_sd_webui if _use_sd_webui() else _generate_image_openai
     paths = []
     for i, s in enumerate(scenes):
-        scene_desc = (s.get("scene") or "").strip() or "修仙场景，云雾缭绕"
-        emotion = (s.get("emotion") or "").strip()
-        if emotion:
-            prompt = f"{scene_desc}，人物情绪：{emotion}"
-        else:
-            prompt = scene_desc
+        prompt = build_visual_prompt(s)
         path = out_dir / f"scene_{i:03d}.png"
         await gen(prompt, path)
         paths.append(path)

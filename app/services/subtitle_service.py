@@ -1,10 +1,11 @@
-"""字幕：将分镜脚本转为 SRT"""
+"""字幕：将分镜脚本转为 SRT（兼容 time 为 0-5 / 0-5s）"""
 
 
 def time_range_to_srt_time(time_str: str) -> str:
-    """把 "0-5s" 转为 SRT 时间轴 00:00:00,000 --> 00:00:05,000"""
+    """把 "0-5s" / "0-5" 转为 SRT 时间轴"""
     try:
-        parts = time_str.replace("s", "").split("-")
+        raw = (time_str or "").strip().lower().replace("s", "")
+        parts = raw.split("-")
         if len(parts) != 2:
             return "00:00:00,000 --> 00:00:05,000"
         start_s = int(parts[0].strip())
@@ -21,14 +22,11 @@ def time_range_to_srt_time(time_str: str) -> str:
 
 
 def to_srt(scenes: list[dict]) -> str:
-    """
-    把 GPT 分镜列表转成 SRT 内容。
-    每个分镜的 time 与 dialogue 用于生成一条字幕。
-    """
+    """分镜列表 → SRT（仅对白）。"""
     srt = []
     for i, s in enumerate(scenes):
         time_str = s.get("time", f"{i*5}-{(i+1)*5}s")
         dialogue = s.get("dialogue", "").strip() or "(画面)"
-        srt_time = time_range_to_srt_time(time_str)
+        srt_time = time_range_to_srt_time(str(time_str))
         srt.append(f"{i + 1}\n{srt_time}\n{dialogue}\n")
     return "\n".join(srt)

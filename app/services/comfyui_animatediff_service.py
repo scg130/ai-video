@@ -18,6 +18,7 @@ from pathlib import Path
 
 from app.config import settings
 from app.services import comfyui_common as cc
+from app.services.visual_prompt import build_visual_prompt
 
 
 async def generate_animatediff_clip(prompt: str, out_path: Path, negative: str = "") -> None:
@@ -29,6 +30,7 @@ async def generate_animatediff_clip(prompt: str, out_path: Path, negative: str =
         prompt_node_id=settings.animatediff_prompt_node_id,
         negative_node_id=settings.animatediff_negative_node_id,
         default_negative=settings.sd_negative_prompt,
+        prepend_style_prefix=False,
     )
     cc.inject_sampler_seed(w, settings.animatediff_randomize_seed)
     await cc.run_workflow_save_output(
@@ -46,9 +48,7 @@ async def generate_animatediff_clips_for_scenes(scenes: list[dict], out_dir: Pat
     paths: list[Path] = []
     neg = settings.sd_negative_prompt
     for i, s in enumerate(scenes):
-        scene_desc = (s.get("scene") or "").strip() or "修仙场景，云雾缭绕"
-        emotion = (s.get("emotion") or "").strip()
-        prompt = f"{scene_desc}，人物情绪：{emotion}" if emotion else scene_desc
+        prompt = build_visual_prompt(s)
         path = out_dir / f"scene_{i:03d}.mp4"
         await generate_animatediff_clip(prompt, path, negative=neg)
         paths.append(path)

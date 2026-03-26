@@ -1,17 +1,23 @@
 """FastAPI 入口：斩仙台短剧一键生成"""
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 from app.config import settings
+from app.db import init_db
 from app.routers import drama
+
+WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings.output_path.mkdir(parents=True, exist_ok=True)
     settings.temp_path.mkdir(parents=True, exist_ok=True)
+    init_db()
     yield
 
 
@@ -36,9 +42,14 @@ drama.register_static(app, settings.output_path)
 
 @app.get("/")
 async def root():
+    index = WEB_DIR / "index.html"
+    if index.is_file():
+        return FileResponse(index)
     return {
         "message": "ai-video-generator API",
         "docs": "/docs",
-        "post": "POST /api/generate_short_drama",
-        "body": {"theme": "example", "style": "example", "duration": 60},
+        "ui": "添加 web/index.html 后访问 / 为控制台",
+        "generate": "POST /api/generate",
+        "status": "GET /api/status/{job_id}",
+        "history": "GET /api/history",
     }

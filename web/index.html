@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>斩仙台 · 短剧生成</title>
+  <style>
+    :root {
+      --bg: #0c0c12;
+      --panel: #16161f;
+      --border: #2a2a38;
+      --text: #e8e6f0;
+      --muted: #8b8698;
+      --accent: #c9a227;
+      --accent-dim: #8a7020;
+      --danger: #c44c4c;
+      --ok: #3d9e6e;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: radial-gradient(ellipse 120% 80% at 50% -20%, #1a1528 0%, var(--bg) 55%);
+      color: var(--text);
+    }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+    h1 {
+      font-size: 1.75rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      margin: 0 0 0.25rem;
+      background: linear-gradient(135deg, #f5e6c8, var(--accent));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .sub { color: var(--muted); font-size: 0.9rem; margin-bottom: 1.5rem; line-height: 1.5; }
+    .steps { display: flex; gap: 0.5rem; margin-bottom: 1.25rem; font-size: 0.85rem; color: var(--muted); }
+    .steps span { padding: 0.25rem 0.6rem; border-radius: 6px; background: #0f0f16; border: 1px solid var(--border); }
+    .steps span.on { border-color: var(--accent); color: var(--accent); }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .card h2 { font-size: 1rem; margin: 0 0 1rem; color: var(--muted); font-weight: 600; }
+    label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.35rem; }
+    input[type="text"], select, textarea {
+      width: 100%;
+      padding: 0.65rem 0.85rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #0f0f16;
+      color: var(--text);
+      font-size: 1rem;
+    }
+    textarea { min-height: 100px; resize: vertical; font-family: inherit; line-height: 1.45; }
+    textarea.script-json {
+      min-height: 320px;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 0.8rem;
+      line-height: 1.4;
+    }
+    input:focus, select:focus, textarea:focus { outline: 1px solid var(--accent-dim); }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 640px) { .row { grid-template-columns: 1fr; } }
+    .actions { margin-top: 1rem; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
+    button.primary {
+      padding: 0.65rem 1.4rem;
+      border: none;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      background: linear-gradient(165deg, #e4c76b, var(--accent));
+      color: #1a1508;
+    }
+    button.secondary {
+      padding: 0.65rem 1.2rem;
+      border-radius: 8px;
+      font-weight: 500;
+      cursor: pointer;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    .status-pill {
+      font-size: 0.85rem;
+      padding: 0.35rem 0.75rem;
+      border-radius: 999px;
+      background: #0f0f16;
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+    .status-pill.running { border-color: var(--accent); color: var(--accent); }
+    .status-pill.done { border-color: var(--ok); color: var(--ok); }
+    .status-pill.failed { border-color: var(--danger); color: var(--danger); }
+    .preview {
+      margin-top: 1rem;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: #000;
+      aspect-ratio: 9/16;
+      max-height: 420px;
+      max-width: 236px;
+    }
+    .preview video { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .wall-title { font-size: 1.05rem; margin: 2rem 0 1rem; color: var(--muted); }
+    .wall {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 1rem;
+    }
+    .tile {
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: #0f0f16;
+    }
+    .tile img { width: 100%; aspect-ratio: 9/16; object-fit: cover; display: block; }
+    .tile .meta { padding: 0.55rem 0.65rem; font-size: 0.75rem; }
+    .tile .theme { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tile .subm { color: var(--muted); margin-top: 0.15rem; }
+    .tile video { width: 100%; display: block; margin-top: 0.35rem; }
+    .err { color: var(--danger); font-size: 0.88rem; margin-top: 0.5rem; }
+    .warn { color: #c9a227; font-size: 0.88rem; margin-top: 0.5rem; line-height: 1.45; }
+    .hint { font-size: 0.78rem; color: var(--muted); margin-top: 0.35rem; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>短剧生成</h1>
+    <p class="sub">
+      ① 填写主题、风格与<strong>故事简介</strong> → 生成剧本<br />
+      ② 在文本框中<strong>自由编辑</strong>分镜 JSON → 生成视频<br />
+      ③ 下方为历史视频墙
+    </p>
+
+    <div class="steps">
+      <span class="on" id="stepLabel1">1 剧本</span>
+      <span id="stepLabel2">2 编辑 & 出片</span>
+    </div>
+
+    <div class="card">
+      <h2>① 输入与故事简介</h2>
+      <div class="row">
+        <div>
+          <label for="theme">主题</label>
+          <input id="theme" type="text" placeholder="如：斩仙台复仇" value="斩仙台复仇" />
+        </div>
+        <div>
+          <label for="style">风格</label>
+          <select id="style">
+            <option value="爽文" selected>爽文</option>
+            <option value="黑暗">黑暗</option>
+            <option value="反转">反转</option>
+            <option value="打脸">打脸</option>
+          </select>
+        </div>
+      </div>
+      <div class="row" style="margin-top:1rem;">
+        <div>
+          <label for="duration">目标时长（秒）</label>
+          <select id="duration">
+            <option value="30">30</option>
+            <option value="60" selected>60</option>
+            <option value="90">90</option>
+            <option value="120">120</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-top:1rem;">
+        <label for="synopsis">故事简介</label>
+        <textarea id="synopsis" placeholder="写清人物关系、核心矛盾、你想要的结局或名场面。大模型会据此写分镜。"></textarea>
+        <p class="hint">简介越具体，剧本越贴你的设想；留空则由模型在题材下自由发挥。</p>
+      </div>
+      <div class="actions">
+        <button class="primary" type="button" id="btnDraft">生成剧本</button>
+      </div>
+      <p class="err" id="errDraft" style="display:none;"></p>
+    </div>
+
+    <div class="card">
+      <h2>② 编辑剧本（JSON）并生成视频</h2>
+      <p class="hint">可直接改 time / scene / camera / dialogue / emotion / role；须为合法 JSON 数组。</p>
+      <textarea id="scriptJson" class="script-json" placeholder='点击上方「生成剧本」后，此处会出现分镜 JSON…'></textarea>
+      <div class="actions">
+        <button class="primary" type="button" id="btnVideo" disabled>生成视频</button>
+        <button class="secondary" type="button" id="btnFormat">格式化 JSON</button>
+        <span class="status-pill" id="pill">就绪</span>
+      </div>
+      <p class="err" id="errVideo" style="display:none;"></p>
+      <div class="preview" id="previewWrap" style="display:none;">
+        <video id="player" controls playsinline></video>
+      </div>
+    </div>
+
+    <h2 class="wall-title">视频墙 · 历史</h2>
+    <div class="wall" id="wall"></div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function setPill(text, cls) {
+      const pill = $("pill");
+      pill.textContent = text;
+      pill.className = "status-pill" + (cls ? " " + cls : "");
+    }
+
+    function escapeHtml(s) {
+      const d = document.createElement("div");
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    /** 解析 FastAPI HTTPException：detail 可为字符串或 { message, error, script } */
+    async function readApiError(res) {
+      const t = await res.text();
+      try {
+        const j = JSON.parse(t);
+        const d = j.detail;
+        if (d && typeof d === "object" && d.message != null) return String(d.message);
+        if (typeof d === "string") return d;
+      } catch (_) {}
+      return t || res.statusText;
+    }
+
+    async function loadHistory() {
+      const res = await fetch("/api/history?limit=40");
+      if (!res.ok) return;
+      const items = await res.json();
+      $("wall").innerHTML = items.map((v) => {
+        const vid = v.video_url || "";
+        const cov = v.cover_url || "";
+        const st = v.status === "completed" ? "" : `<div class="subm">${escapeHtml(v.status)}</div>`;
+        return `
+          <div class="tile">
+            ${cov ? `<img src="${cov}" alt="" loading="lazy" />` : "<div style='aspect-ratio:9/16;background:#222'></div>"}
+            <div class="meta">
+              <div class="theme">${escapeHtml(v.theme)}</div>
+              <div class="subm">${escapeHtml(v.style)} · ${v.duration}s</div>
+              ${st}
+              ${vid && v.status === "completed" ? `<video src="${vid}" controls playsinline></video>` : ""}
+            </div>
+          </div>`;
+      }).join("");
+    }
+
+    let pollTimer = null;
+    function poll(jobId, delayMs = 2000) {
+      if (pollTimer) clearTimeout(pollTimer);
+      pollTimer = setTimeout(async () => {
+        try {
+          const res = await fetch("/api/status/" + encodeURIComponent(jobId));
+          const data = await res.json();
+          if (data.status === "done") {
+            setPill("完成", "done");
+            $("btnVideo").disabled = false;
+            if (data.video_url) {
+              $("player").src = data.video_url;
+              $("previewWrap").style.display = "block";
+            }
+            $("stepLabel2").classList.add("on");
+            loadHistory();
+            return;
+          }
+          if (data.status === "failed") {
+            setPill("失败", "failed");
+            $("btnVideo").disabled = false;
+            $("errVideo").style.display = "block";
+            $("errVideo").textContent = data.error || "生成失败";
+            loadHistory();
+            return;
+          }
+          setPill(data.status === "running" ? "渲染中…" : "排队中", "running");
+          poll(jobId, 2000);
+        } catch (e) {
+          setPill("错误", "failed");
+          $("btnVideo").disabled = false;
+          $("errVideo").style.display = "block";
+          $("errVideo").textContent = String(e);
+        }
+      }, delayMs);
+    }
+
+    $("btnDraft").onclick = async () => {
+      $("errDraft").style.display = "none";
+      $("btnDraft").disabled = true;
+      const theme = $("theme").value.trim() || "斩仙台复仇";
+      const style = $("style").value;
+      const duration = parseInt($("duration").value, 10);
+      const synopsis = $("synopsis").value.trim();
+      try {
+        const res = await fetch("/api/script/draft", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ theme, style, duration, synopsis }),
+        });
+        if (!res.ok) {
+          throw new Error(await readApiError(res));
+        }
+        const data = await res.json();
+        $("scriptJson").value = JSON.stringify(data.script, null, 2);
+        $("btnVideo").disabled = false;
+        $("stepLabel2").classList.add("on");
+        if (data.fallback) {
+          $("errDraft").className = "warn";
+          $("errDraft").style.display = "block";
+          $("errDraft").textContent =
+            "大模型不可用，已填入兜底分镜模板，请修改后再生成视频。" +
+            (data.message ? " 原因：" + data.message : "") +
+            (data.error_code ? " [" + data.error_code + "]" : "");
+        } else {
+          $("errDraft").style.display = "none";
+          $("errDraft").className = "err";
+        }
+      } catch (e) {
+        $("errDraft").className = "err";
+        $("errDraft").style.display = "block";
+        $("errDraft").textContent = String(e);
+      } finally {
+        $("btnDraft").disabled = false;
+      }
+    };
+
+    $("btnFormat").onclick = () => {
+      $("errVideo").style.display = "none";
+      try {
+        const parsed = JSON.parse($("scriptJson").value);
+        $("scriptJson").value = JSON.stringify(parsed, null, 2);
+      } catch (e) {
+        $("errVideo").style.display = "block";
+        $("errVideo").textContent = "JSON 格式错误：" + e.message;
+      }
+    };
+
+    $("btnVideo").onclick = async () => {
+      $("errVideo").style.display = "none";
+      let script;
+      try {
+        script = JSON.parse($("scriptJson").value);
+        if (!Array.isArray(script) || script.length === 0) throw new Error("剧本须为非空数组");
+      } catch (e) {
+        $("errVideo").style.display = "block";
+        $("errVideo").textContent = "请先「生成剧本」或修正 JSON：" + e.message;
+        return;
+      }
+      $("btnVideo").disabled = true;
+      setPill("提交中…", "running");
+      const theme = $("theme").value.trim() || "斩仙台复仇";
+      const style = $("style").value;
+      const duration = parseInt($("duration").value, 10);
+      try {
+        const res = await fetch("/api/generate_video", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ theme, style, duration, script }),
+        });
+        if (!res.ok) {
+          throw new Error(await readApiError(res));
+        }
+        const data = await res.json();
+        setPill("排队 / 渲染中", "running");
+        poll(data.job_id, 0);
+      } catch (e) {
+        setPill("失败", "failed");
+        $("btnVideo").disabled = false;
+        $("errVideo").style.display = "block";
+        $("errVideo").textContent = String(e);
+      }
+    };
+
+    loadHistory();
+  </script>
+</body>
+</html>

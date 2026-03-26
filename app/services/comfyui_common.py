@@ -29,10 +29,11 @@ def inject_prompts(
     negative_node_id: str,
     default_negative: str,
     style_prefix: str = DRAMA_STYLE_PREFIX,
+    prepend_style_prefix: bool = True,
 ) -> dict[str, Any]:
     """注入正/负向词；未配置 node id 时按 CLIPTextEncode / TextEncode 顺序猜测。"""
     w = json.loads(json.dumps(workflow))
-    pos = (style_prefix + positive)[:4000]
+    pos = ((style_prefix + positive) if prepend_style_prefix else positive)[:4000]
     neg = (negative or default_negative or "")[:4000]
 
     pid = (prompt_node_id or "").strip()

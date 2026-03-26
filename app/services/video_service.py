@@ -1,8 +1,10 @@
-"""自动剪辑：FFmpeg 拼接图片+配音+字幕+BGM，导出短视频。"""
+"""自动剪辑：Ken Burns、xfade 转场、抖音风字幕、封面大字。"""
 import subprocess
 import shutil
 from pathlib import Path
 from typing import List, Optional
+
+from app.config import settings
 
 
 def _run_ffmpeg(args: list[str], cwd: Optional[Path] = None) -> None:
@@ -14,6 +16,90 @@ def _run_ffmpeg(args: list[str], cwd: Optional[Path] = None) -> None:
     )
 
 
+def segment_durations_from_scenes(scenes: list[dict], default: float = 5.0) -> list[float]:
+    """从分镜 time 字段解析每段时长（秒），如 0-3s → 3，3-8s → 5。"""
+    out: list[float] = []
+    for i, s in enumerate(scenes):
+        t = str(s.get("time", f"{i * int(default)}-{(i + 1) * int(default)}s"))
+        try:
+            t = t.lower().replace("s", "").strip()
+            parts = t.split("-", 1)
+            a, b = float(parts[0].strip()), float(parts[1].strip())
+            out.append(max(1.0, b - a))
+        except (ValueError, IndexError):
+            out.append(default)
+    return out
+
+
+def _subtitle_filter_arg(srt_path: Path) -> str:
+    srt_esc = str(srt_path.absolute()).replace("\\", "/").replace(":", "\\:")
+    style = getattr(settings, "ffmpeg_subtitle_style", "Fontsize=28,Bold=1,PrimaryColour=&H00FFFFFF&,Outline=3")
+    return f"subtitles='{srt_esc}':force_style='{style}'"
+
+
+def _image_to_segment_mp4(
+    img_path: Path,
+    out_path: Path,
+    duration: float,
+    temp_dir: Path,
+    use_ken_burns: bool,
+) -> None:
+    w = settings.video_output_width
+    h = settings.video_output_height
+    fps = settings.ffmpeg_fps
+    d_frames = max(1, int(duration * fps))
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    if use_ken_burns:
+        vf = (
+            f"scale=iw*3:ih*3,zoompan=z='min(zoom+0.0012,1.35)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+            f":d={d_frames}:s={w}x{h}:fps={fps}"
+        )
+    else:
+        vf = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,fps={fps}"
+    _run_ffmpeg([
+        "-loop", "1", "-i", str(img_path),
+        "-vf", vf,
+        "-t", str(duration),
+        "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        str(out_path),
+    ])
+
+
+def _xfade_concat_segments(
+    segment_paths: List[Path],
+    durations: List[float],
+    out_path: Path,
+    fade_d: float,
+) -> None:
+    n = len(segment_paths)
+    if n == 0:
+        raise ValueError("无视频片段")
+    if n == 1:
+        shutil.copy2(segment_paths[0], out_path)
+        return
+    inputs = []
+    for p in segment_paths:
+        inputs.extend(["-i", str(p)])
+    parts: list[str] = []
+    acc = "[0:v]"
+    for i in range(1, n):
+        offset = sum(durations[:i]) - i * fade_d
+        outlab = f"xv{i}" if i < n - 1 else "vout"
+        parts.append(f"{acc}[{i}:v]xfade=transition=fade:duration={fade_d}:offset={offset}[{outlab}]")
+        acc = f"[{outlab}]"
+    fc = ";".join(parts)
+    _run_ffmpeg(inputs + ["-filter_complex", fc, "-map", "[vout]", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(out_path)])
+
+
+def _concat_demuxer_segments(segment_paths: List[Path], out_path: Path, temp_dir: Path) -> None:
+    lst = temp_dir / "seg_concat.txt"
+    with open(lst, "w") as f:
+        for p in segment_paths:
+            f.write(f"file '{p.absolute()}'\n")
+    _run_ffmpeg(["-f", "concat", "-safe", "0", "-i", str(lst), "-c", "copy", str(out_path)])
+
+
 def build_video(
     image_paths: List[Path],
     audio_paths: List[Optional[Path]],
@@ -23,51 +109,46 @@ def build_video(
     bgm_path: Optional[Path] = None,
     seconds_per_image: float = 5.0,
     temp_dir: Optional[Path] = None,
+    segment_durations: Optional[List[float]] = None,
 ) -> Path:
     """
-    用 FFmpeg 做：
-    1. 图片序列 + 每张时长 -> 无音视频
-    2. 按句拼接 TTS 音频（或静音）成一条音轨
-    3. 混流：视频 + 配音
-    4. 烧录字幕
-    5. 可选混 BGM
-    返回最终视频路径。
+    图序列 →（可选 Ken Burns）→（可选 xfade）→ 配音 → 字幕 → BGM。
     """
     temp_dir = temp_dir or output_video.parent
     temp_dir.mkdir(parents=True, exist_ok=True)
-    # 1) 图片序列 -> 视频（固定帧率，每张 5 秒）
-    # ffmpeg -r 1/5 -i img_%03d.png -c:v libx264 -pix_fmt yuv420p -r 24 video_no_audio.mp4
-    concat_list = temp_dir / "concat_list.txt"
-    with open(concat_list, "w") as f:
-        for p in image_paths:
-            f.write(f"file '{p.absolute()}'\nduration {seconds_per_image}\n")
-        # 最后一张要再写一次（无 duration）否则 ffmpeg 会丢
-        if image_paths:
-            f.write(f"file '{image_paths[-1].absolute()}'\n")
+    durs = segment_durations or [seconds_per_image] * len(image_paths)
+    if len(durs) < len(image_paths):
+        durs.extend([seconds_per_image] * (len(image_paths) - len(durs)))
+
+    use_kb = getattr(settings, "ffmpeg_ken_burns", True)
+    use_xf = getattr(settings, "ffmpeg_xfade", True) and len(image_paths) > 1
+    fade_d = float(getattr(settings, "ffmpeg_xfade_duration", 0.5))
+
+    segs: List[Path] = []
+    for i, p in enumerate(image_paths):
+        seg = temp_dir / f"kb_{i:03d}.mp4"
+        _image_to_segment_mp4(p, seg, durs[i], temp_dir, use_kb)
+        segs.append(seg)
 
     video_no_audio = temp_dir / "video_no_audio.mp4"
-    _run_ffmpeg([
-        "-f", "concat", "-safe", "0", "-i", str(concat_list),
-        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", "24",
-        "-movflags", "+faststart",
-        str(video_no_audio),
-    ])
+    if use_xf:
+        _xfade_concat_segments(segs, durs, video_no_audio, fade_d)
+    else:
+        _concat_demuxer_segments(segs, video_no_audio, temp_dir)
 
-    # 2) 拼接所有 TTS 片段为一条配音（与分镜一一对应，无台词处用静音）
     voice_concat_list = temp_dir / "voice_list.txt"
     with open(voice_concat_list, "w") as f:
         for i, ap in enumerate(audio_paths):
+            dur = durs[i] if i < len(durs) else seconds_per_image
             if ap and ap.exists():
                 f.write(f"file '{ap.absolute()}'\n")
             else:
-                # 静音 5 秒
                 silent = temp_dir / f"silent_{i}.mp3"
-                _run_ffmpeg(["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-t", str(seconds_per_image), "-q:a", "9", str(silent)])
+                _run_ffmpeg(["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-t", str(dur), "-q:a", "9", str(silent)])
                 f.write(f"file '{silent.absolute()}'\n")
     voice_merged = temp_dir / "voice_merged.mp3"
     _run_ffmpeg(["-f", "concat", "-safe", "0", "-i", str(voice_concat_list), "-c", "copy", str(voice_merged)])
 
-    # 3) 视频 + 配音（-shortest 以视频为准）
     video_with_voice = temp_dir / "video_with_voice.mp4"
     _run_ffmpeg([
         "-i", str(video_no_audio),
@@ -76,18 +157,14 @@ def build_video(
         str(video_with_voice),
     ])
 
-    # 4) 烧录字幕（SRT 路径需转义给 filter）
-    # 使用 subtitles filter: 注意 Windows 路径要转义，这里用 Path 且假设无特殊字符
-    srt_esc = str(srt_path.absolute()).replace("\\", "/").replace(":", "\\:")
     video_with_subs = temp_dir / "video_with_subs.mp4"
     _run_ffmpeg([
         "-i", str(video_with_voice),
-        "-vf", f"subtitles='{srt_esc}':force_style='Fontsize=24,PrimaryColour=&Hffffff&,Outline=2'",
+        "-vf", _subtitle_filter_arg(srt_path),
         "-c:a", "copy",
         str(video_with_subs),
     ])
 
-    # 5) 可选 BGM 混音（配音主，BGM 压低）
     if bgm_path and bgm_path.exists():
         _run_ffmpeg([
             "-i", str(video_with_subs),
@@ -108,9 +185,6 @@ def _normalize_clip_to_duration(
     temp_dir: Path,
     index: int,
 ) -> Path:
-    """
-    将单段素材统一为固定时长视频（mp4）：视频则裁剪/循环到 seconds；单张图则拉成静态视频。
-    """
     temp_dir.mkdir(parents=True, exist_ok=True)
     out = temp_dir / f"norm_{index:03d}.mp4"
     suf = clip_path.suffix.lower()
@@ -118,15 +192,15 @@ def _normalize_clip_to_duration(
         _run_ffmpeg([
             "-loop", "1", "-i", str(clip_path),
             "-c:v", "libx264", "-t", str(seconds), "-pix_fmt", "yuv420p",
-            "-r", "24", "-movflags", "+faststart",
+            "-r", str(settings.ffmpeg_fps), "-movflags", "+faststart",
             str(out),
         ])
         return out
-    # 视频：先裁剪到最多 seconds（短则保持原长，由 concat 后 -shortest 与音轨对齐）
     _run_ffmpeg([
         "-i", str(clip_path),
         "-t", str(seconds),
-        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", "24",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        "-r", str(settings.ffmpeg_fps),
         "-an", "-movflags", "+faststart",
         str(out),
     ])
@@ -142,38 +216,36 @@ def build_video_from_clips(
     bgm_path: Optional[Path] = None,
     seconds_per_clip: float = 5.0,
     temp_dir: Optional[Path] = None,
+    segment_durations: Optional[List[float]] = None,
 ) -> Path:
-    """
-    由多段 ComfyUI/CogVideoX 生成的视频（或回退图片）拼接，再混 TTS、烧字幕、可选 BGM。
-    """
     temp_dir = temp_dir or output_video.parent
     temp_dir.mkdir(parents=True, exist_ok=True)
+    durs = segment_durations or [seconds_per_clip] * len(clip_paths)
+    if len(durs) < len(clip_paths):
+        durs.extend([seconds_per_clip] * (len(clip_paths) - len(durs)))
 
     normalized: List[Path] = []
     for i, p in enumerate(clip_paths):
-        normalized.append(_normalize_clip_to_duration(p, seconds_per_clip, temp_dir, i))
+        dur = durs[i] if i < len(durs) else seconds_per_clip
+        normalized.append(_normalize_clip_to_duration(p, dur, temp_dir, i))
 
-    concat_list = temp_dir / "video_clips_concat.txt"
-    with open(concat_list, "w") as f:
-        for p in normalized:
-            f.write(f"file '{p.absolute()}'\n")
-
+    use_xf = getattr(settings, "ffmpeg_xfade", True) and len(normalized) > 1
+    fade_d = float(getattr(settings, "ffmpeg_xfade_duration", 0.5))
     video_no_audio = temp_dir / "clips_concat.mp4"
-    _run_ffmpeg([
-        "-f", "concat", "-safe", "0", "-i", str(concat_list),
-        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", "24",
-        "-movflags", "+faststart",
-        str(video_no_audio),
-    ])
+    if use_xf:
+        _xfade_concat_segments(normalized, durs, video_no_audio, fade_d)
+    else:
+        _concat_demuxer_segments(normalized, video_no_audio, temp_dir)
 
     voice_concat_list = temp_dir / "voice_list.txt"
     with open(voice_concat_list, "w") as f:
         for i, ap in enumerate(audio_paths):
+            dur = durs[i] if i < len(durs) else seconds_per_clip
             if ap and ap.exists():
                 f.write(f"file '{ap.absolute()}'\n")
             else:
                 silent = temp_dir / f"silent_{i}.mp3"
-                _run_ffmpeg(["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-t", str(seconds_per_clip), "-q:a", "9", str(silent)])
+                _run_ffmpeg(["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-t", str(dur), "-q:a", "9", str(silent)])
                 f.write(f"file '{silent.absolute()}'\n")
     voice_merged = temp_dir / "voice_merged.mp3"
     _run_ffmpeg(["-f", "concat", "-safe", "0", "-i", str(voice_concat_list), "-c", "copy", str(voice_merged)])
@@ -186,11 +258,10 @@ def build_video_from_clips(
         str(video_with_voice),
     ])
 
-    srt_esc = str(srt_path.absolute()).replace("\\", "/").replace(":", "\\:")
     video_with_subs = temp_dir / "video_with_subs.mp4"
     _run_ffmpeg([
         "-i", str(video_with_voice),
-        "-vf", f"subtitles='{srt_esc}':force_style='Fontsize=24,PrimaryColour=&Hffffff&,Outline=2'",
+        "-vf", _subtitle_filter_arg(srt_path),
         "-c:a", "copy",
         str(video_with_subs),
     ])
@@ -207,3 +278,19 @@ def build_video_from_clips(
         shutil.copy2(video_with_subs, output_video)
 
     return output_video
+
+
+def enhance_cover_with_title(cover_src: Path, title: str, out_path: Path, temp_dir: Path) -> None:
+    """封面叠加大字标题（金/红抖音风），title 写入临时文件避免 shell 转义问题。"""
+    if not title or not title.strip():
+        shutil.copy2(cover_src, out_path)
+        return
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    tf = temp_dir / "cover_title.txt"
+    tf.write_text(title.strip()[:40], encoding="utf-8")
+    tfp = str(tf.absolute()).replace("\\", "/").replace(":", "\\:")
+    vf = (
+        f"drawtext=textfile='{tfp}':fontcolor=#FFD700:fontsize=56:"
+        f"x=(w-text_w)/2:y=h*0.08:borderw=4:bordercolor=black@0.8:box=1:boxcolor=black@0.35"
+    )
+    _run_ffmpeg(["-i", str(cover_src), "-vf", vf, "-y", str(out_path)])

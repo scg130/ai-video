@@ -1,13 +1,13 @@
 # 斩仙台短剧一键生成
 
-输入关键词（斩仙台/修仙/复仇）→ **GPT 剧本** → **TTS 配音** → **文生图** → **FFmpeg 自动剪辑（字幕+转场+BGM）** → 导出短视频（抖音风）。
+输入**主题 / 风格 / 故事简介** → **GPT 生成分镜剧本**（可编辑）→ **提交后**走 **TTS** → **文生图/视频** → **FFmpeg（字幕+转场+BGM）** → 导出短视频（抖音风）。
 
 ## 架构
 
 ```
-输入 theme / style / duration
+输入 theme / style / duration / synopsis（故事简介）
         ↓
-  GPT 生成分镜脚本（JSON）
+  GPT 生成分镜脚本（JSON，前端可编辑后再提交）
         ↓
   TTS 生成配音（OpenAI / 内部 API）
         ↓
@@ -39,7 +39,9 @@ cp .env.example .env
 
 | 变量 | 说明 |
 |------|------|
-| `OPENAI_API_KEY` | 必填，用于 GPT 剧本、TTS、文生图 |
+| `OPENAI_API_KEY` | 至少配置其一：单 Key，用于 GPT 剧本、OpenAI TTS、DALL·E |
+| `OPENAI_API_KEYS` | 可选：多 Key（逗号/空格/换行分隔），与单 Key 合并去重；请求**轮询起始 Key**，401/403/429 时**自动换 Key** 重试 |
+| `QUEUE_MAX_CONCURRENT` | 内存队列并发（`USE_CELERY=false`），默认 **1**（任务严格排队逐个跑）；Celery 模式需在 worker 侧用 `-c 1` 若也要串行 |
 | `USE_OPENAI_TTS` | 默认 true；false 时用内部 TTS，需配 `TTS_BASE_URL` |
 | `IMAGE_PROVIDER` | `openai`（DALL·E）或 `sd_webui`（本地 SD） |
 | `USE_OPENAI_IMAGE` | 旧配置：`false` 时等同走本地 SD（与 `IMAGE_PROVIDER=sd_webui` 二选一即可） |
@@ -51,6 +53,7 @@ cp .env.example .env
 | `COMFYUI_BASE_URL` | ComfyUI API，默认 `http://127.0.0.1:8188` |
 | `COGVIDEOX_WORKFLOW_PATH` | CogVideoX API workflow JSON 绝对路径 |
 | `ANIMATEDIFF_WORKFLOW_PATH` | AnimateDiff API workflow JSON 绝对路径 |
+| `DATABASE_URL` | 默认 `sqlite:///./data/videos.db`（历史记录 / 视频墙） |
 
 ## 运行
 
@@ -58,12 +61,66 @@ cp .env.example .env
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
+- **Web 控制台**：http://localhost:8000/（`web/index.html`：**故事简介** → **生成剧本**（可编辑 JSON）→ **生成视频** → 轮询 / 视频墙）  
 - API 文档：http://localhost:8000/docs  
-- 一键生成：`POST /api/generate_short_drama`
+- **推荐交互流程**：`POST /api/script/draft`（主题、风格、时长、简介）→ 用户编辑 `script` → `POST /api/generate_video`（同上 + `script` 数组）→ `GET /api/status/{job_id}`（`status === "done"`）→ `GET /api/history`  
+- **一键异步（不写简介、不编辑剧本）**：`POST /api/generate` → `GET /api/status/{job_id}` → `GET /api/history`  
+- **同步**：`POST /api/generate_short_drama`（长耗时，易超时）  
+- **兼容**：`POST /api/jobs` → `GET /api/jobs/{job_id}`  
+  - `USE_CELERY=false`：进程内 asyncio + 信号量限流（`QUEUE_MAX_CONCURRENT`）  
+  - `USE_CELERY=true`：需 Redis，另开 worker：`celery -A app.celery_app:celery_app worker -l info`  
+- **数据库**：SQLite `data/videos.db`（`DATABASE_URL`），表 `videos`：`job_id, theme, style, duration, video_url, cover_url, status, created_at, error`
+
+## 核心优化（剧本 / 队列 / TTS / 画面 / FFmpeg）
+
+| 能力 | 说明 |
+|------|------|
+| **两步剧本** | `SCRIPT_TWO_STEP=true`：先大纲（钩子+节奏），再分镜；含 `camera`、`role`、短台词、开头 3 秒抓眼 |
+| **RAG** | `RAG_ENABLED=true`：Chroma 检索历史剧情并写入本集摘要，利于系列续写 |
+| **统一画面 Prompt** | `app/services/visual_prompt.py`：仙侠电影感 + scene/emotion/camera + cinematic 4k |
+| **多角色 TTS** | `role`→OpenAI 声线：主角 onyx、反派 echo、女主 shimmer 等（可接 GPT-SoVITS / CosyVoice 扩展内部 API） |
+| **FFmpeg** | Ken Burns（`FFMPEG_KEN_BURNS`）、片段间 `xfade`（`FFMPEG_XFADE`）、抖音风字幕样式 |
+| **变长分镜** | 按分镜 `time`（如 `0-3s`）解析每段时长，对齐首镜「3 秒必炸」 |
+| **封面大字** | `COVER_PROMO_TITLE`：首句台词/画面叠金色标题 |
 
 ## API 示例
 
-**请求**
+**1）仅生成剧本（可编辑后再出片）**
+
+```http
+POST /api/script/draft
+Content-Type: application/json
+
+{
+  "theme": "斩仙台复仇",
+  "style": "爽文",
+  "duration": 60,
+  "synopsis": "主角被诬上斩仙台，真相反转后反杀仇敌。"
+}
+```
+
+响应体含 `script`（分镜数组），与 `generate_video` 的 `script` 格式一致。  
+**失败兜底**：仍返回 **HTTP 200**，`ok: false`、`fallback: true`，`script` 为可编辑占位分镜，`error_code`（如 `openai_unavailable` / `draft_failed`）与 `message` 说明原因。
+
+**2）用编辑后的剧本异步生成视频**
+
+```http
+POST /api/generate_video
+Content-Type: application/json
+
+{
+  "theme": "斩仙台复仇",
+  "style": "爽文",
+  "duration": 60,
+  "script": [
+    { "time": "0-5s", "scene": "...", "dialogue": "...", "emotion": "..." }
+  ]
+}
+```
+
+返回 `{ "job_id": "..." }`，再轮询 `GET /api/status/{job_id}`。
+
+**3）同步一键（长耗时，易超时）**
 
 ```http
 POST /api/generate_short_drama
@@ -76,7 +133,7 @@ Content-Type: application/json
 }
 ```
 
-**响应**
+**响应（同步）**
 
 ```json
 {
@@ -165,17 +222,28 @@ Content-Type: application/json
 
 ```
 ai-video/
+├── web/
+│   └── index.html           # 首页 UI（输入区 + 视频墙）
+├── data/                    # SQLite（gitignore）
 ├── app/
 │   ├── main.py              # FastAPI 入口
 │   ├── config.py            # 配置
 │   ├── schemas.py           # 请求/响应模型
+│   ├── db.py                # SQLModel 引擎
+│   ├── db_models.py         # videos 表
+│   ├── crud/history.py      # 历史读写
+│   ├── celery_app.py        # Celery 应用（可选）
+│   ├── tasks_drama.py       # Celery 任务
+│   ├── queue/               # 内存异步队列
 │   ├── routers/
-│   │   └── drama.py         # POST /api/generate_short_drama
+│   │   └── drama.py         # 同步 /api/jobs /api/jobs/{id}
 │   └── services/
-│       ├── script_service.py   # GPT 分镜脚本
-│       ├── subtitle_service.py # 脚本 → SRT
-│       ├── tts_service.py      # TTS
-│       ├── image_service.py    # 文生图
+│       ├── script_service.py   # 两步剧本 + 导演 prompt
+│       ├── rag_service.py      # Chroma 系列记忆
+│       ├── visual_prompt.py    # 统一画面 prompt
+│       ├── subtitle_service.py
+│       ├── tts_service.py      # 多角色 TTS
+│       ├── image_service.py
 │       ├── comfyui_common.py         # ComfyUI API 公共逻辑
 │       ├── comfyui_cogvideox_service.py
 │       ├── comfyui_animatediff_service.py  # AnimateDiff 文生视频
