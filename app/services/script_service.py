@@ -1,6 +1,8 @@
 """剧本：可选两步生成（大纲 → 分镜+镜头语言），接 RAG 参考。"""
 import json
+import random
 import re
+import time
 from typing import Any, Optional
 
 from langchain_openai import ChatOpenAI
@@ -126,6 +128,86 @@ def normalize_scenes_list(raw: list) -> list[dict[str, Any]]:
     return out
 
 
+def _is_openai_rate_limit(exc: BaseException) -> bool:
+    try:
+        import openai
+
+        if isinstance(exc, openai.RateLimitError):
+            return True
+        if isinstance(exc, openai.APIStatusError) and getattr(exc, "status_code", None) == 429:
+            return True
+    except ImportError:
+        pass
+    low = str(exc).lower()
+    return "429" in low and ("rate" in low or "limit" in low)
+
+
+def _local_llm_configured() -> bool:
+    base = (getattr(settings, "local_llm_base_url", None) or "").strip()
+    model = (getattr(settings, "local_llm_model", None) or "").strip()
+    return bool(base and model)
+
+
+def _invoke_local_llm(system: str, user: str) -> str:
+    if not _local_llm_configured():
+        raise RuntimeError("未配置 LOCAL_LLM_BASE_URL / LOCAL_LLM_MODEL，无法用本地模型生成剧本")
+    base = settings.local_llm_base_url.strip().rstrip("/")
+    timeout = float(getattr(settings, "local_llm_timeout_sec", 120.0) or 120.0)
+    llm = ChatOpenAI(
+        model=settings.local_llm_model.strip(),
+        api_key=(settings.local_llm_api_key or "ollama").strip() or "ollama",
+        base_url=base,
+        temperature=0.85,
+        timeout=timeout,
+        max_retries=0,
+    )
+    msg = llm.invoke([SystemMessage(content=system), HumanMessage(content=user)])
+    return msg.content if hasattr(msg, "content") else str(msg)
+
+
+def _invoke_openai_llm_with_429_backoff(system: str, user: str) -> str:
+    max_r = max(1, int(getattr(settings, "script_openai_429_max_retries", 4)))
+    base_delay = float(getattr(settings, "script_openai_429_base_delay_sec", 2.0))
+
+    def _call(api_key: str) -> str:
+        last: BaseException | None = None
+        for attempt in range(max_r):
+            try:
+                llm = ChatOpenAI(
+                    model=getattr(settings, "openai_script_model", "gpt-4o-mini"),
+                    api_key=api_key,
+                    temperature=0.85,
+                    timeout=120.0,
+                    max_retries=0,
+                )
+                msg = llm.invoke([SystemMessage(content=system), HumanMessage(content=user)])
+                return msg.content if hasattr(msg, "content") else str(msg)
+            except Exception as e:
+                last = e
+                if _is_openai_rate_limit(e) and attempt < max_r - 1:
+                    delay = base_delay * (2**attempt) + random.uniform(0, 0.75)
+                    time.sleep(delay)
+                    continue
+                raise
+        raise last if last else RuntimeError("OpenAI 调用失败")
+
+    return run_with_key_rotation(_call, what="剧本生成")
+
+
+def _invoke_llm(system: str, user: str) -> str:
+    mode = (getattr(settings, "script_llm_mode", "openai") or "openai").lower().strip()
+    if mode == "local":
+        return _invoke_local_llm(system, user)
+    if mode == "openai_fallback_local":
+        try:
+            return _invoke_openai_llm_with_429_backoff(system, user)
+        except Exception:
+            if _local_llm_configured():
+                return _invoke_local_llm(system, user)
+            raise
+    return _invoke_openai_llm_with_429_backoff(system, user)
+
+
 def build_fallback_draft_scenes(
     theme: str,
     style: str,
@@ -167,19 +249,6 @@ def build_fallback_draft_scenes(
     return normalize_scenes_list(raw)
 
 
-def _invoke_llm(system: str, user: str) -> str:
-    def _call(api_key: str) -> str:
-        llm = ChatOpenAI(
-            model=getattr(settings, "openai_script_model", "gpt-4o-mini"),
-            api_key=api_key,
-            temperature=0.85,
-        )
-        msg = llm.invoke([SystemMessage(content=system), HumanMessage(content=user)])
-        return msg.content if hasattr(msg, "content") else str(msg)
-
-    return run_with_key_rotation(_call, what="剧本生成")
-
-
 def generate_script(
     theme: str,
     style: str,
@@ -213,6 +282,8 @@ def generate_script(
         )
         raw = _parse_scenes_from_response(content)
         scenes = [_normalize_scene(i, s) for i, s in enumerate(raw) if isinstance(s, dict)]
+        if not scenes:
+            return build_fallback_draft_scenes(theme, style, duration, synopsis)
         return scenes
 
     outline_raw = _invoke_llm(
@@ -247,6 +318,8 @@ def generate_script(
     )
     raw = _parse_scenes_from_response(content)
     scenes = [_normalize_scene(i, s) for i, s in enumerate(raw) if isinstance(s, dict)]
+    if not scenes:
+        return build_fallback_draft_scenes(theme, style, duration, synopsis)
 
     try:
         hook = str(outline_obj.get("hook_first_3s", ""))

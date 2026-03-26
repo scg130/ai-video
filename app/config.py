@@ -14,6 +14,19 @@ class Settings(BaseSettings):
 
     # 剧本：两步（大纲→分镜）+ 导演向 prompt
     script_two_step: bool = True
+    # 剧本 LLM：openai | local | openai_fallback_local（OpenAI 失败再试本地）
+    script_llm_mode: str = "openai"
+    # 本地 OpenAI 兼容接口（如 Ollama：http://127.0.0.1:11434/v1 ）
+    local_llm_base_url: str = ""
+    local_llm_model: str = "llama3.2"
+    local_llm_api_key: str = "ollama"
+    local_llm_timeout_sec: float = 120.0
+    # OpenAI 剧本：遇 429 时同一 Key 指数退避重试次数（之后再换 Key）
+    script_openai_429_max_retries: int = 4
+    script_openai_429_base_delay_sec: float = 2.0
+
+    # 流水线容错：单镜图/音/视频失败时用占位，尽量仍导出成片
+    pipeline_fault_tolerant: bool = True
 
     # RAG / Chroma 系列记忆
     rag_enabled: bool = True

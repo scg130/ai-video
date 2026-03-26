@@ -32,6 +32,8 @@ async def _tts_openai(
 ) -> list[Path]:
     roles = roles or []
 
+    tolerant = getattr(settings, "pipeline_fault_tolerant", True)
+
     async def _run(api_key: str) -> list[Path]:
         client = AsyncOpenAI(api_key=api_key)
         paths: list[Path] = []
@@ -42,13 +44,19 @@ async def _tts_openai(
             role = roles[i] if i < len(roles) else ""
             voice = _voice_for_role(role)
             path = out_dir / f"tts_{i:03d}.mp3"
-            resp = await client.audio.speech.create(
-                model="tts-1",
-                voice=voice,
-                input=text[:4096],
-            )
-            path.write_bytes(resp.content)
-            paths.append(path)
+            try:
+                resp = await client.audio.speech.create(
+                    model="tts-1",
+                    voice=voice,
+                    input=text[:4096],
+                )
+                path.write_bytes(resp.content)
+                paths.append(path)
+            except Exception:
+                if tolerant:
+                    paths.append(None)
+                else:
+                    raise
         return paths
 
     return await async_run_with_key_rotation(_run, what="OpenAI TTS")
@@ -65,6 +73,7 @@ async def _tts_internal_api(
         raise ValueError("TTS_BASE_URL 未配置，请使用 USE_OPENAI_TTS=true 或配置内部 TTS")
     paths = []
     roles = roles or []
+    tolerant = getattr(settings, "pipeline_fault_tolerant", True)
     async with httpx.AsyncClient(timeout=120.0) as client:
         for i, text in enumerate(texts):
             if not text or not text.strip():
@@ -74,14 +83,20 @@ async def _tts_internal_api(
             role = roles[i] if i < len(roles) else "主角"
             emotion = (emotion_hints or [""])[i] if emotion_hints else ""
             payload = {"text": text[:4096], "emotion": emotion, "role": role}
-            r = await client.post(
-                f"{base}/tts",
-                json=payload,
-                headers={"Authorization": f"Bearer {settings.tts_api_key}"} if settings.tts_api_key else {},
-            )
-            r.raise_for_status()
-            path.write_bytes(r.content)
-            paths.append(path)
+            try:
+                r = await client.post(
+                    f"{base}/tts",
+                    json=payload,
+                    headers={"Authorization": f"Bearer {settings.tts_api_key}"} if settings.tts_api_key else {},
+                )
+                r.raise_for_status()
+                path.write_bytes(r.content)
+                paths.append(path)
+            except Exception:
+                if tolerant:
+                    paths.append(None)
+                else:
+                    raise
     return paths
 
 

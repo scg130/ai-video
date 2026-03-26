@@ -6,6 +6,7 @@ import httpx
 from openai import AsyncOpenAI
 
 from app.config import settings
+from app.services.media_fallback import placeholder_png
 from app.services.openai_keys import async_run_with_key_rotation
 from app.services.visual_prompt import build_visual_prompt
 
@@ -83,10 +84,19 @@ async def generate_images_for_scenes(scenes: list[dict], out_dir: Path) -> list[
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     gen = _generate_image_sd_webui if _use_sd_webui() else _generate_image_openai
+    tolerant = getattr(settings, "pipeline_fault_tolerant", True)
     paths = []
     for i, s in enumerate(scenes):
         prompt = build_visual_prompt(s)
         path = out_dir / f"scene_{i:03d}.png"
-        await gen(prompt, path)
+        try:
+            await gen(prompt, path)
+            if not path.exists() or path.stat().st_size < 32:
+                raise RuntimeError("图像文件无效")
+        except Exception:
+            if tolerant:
+                placeholder_png(path)
+            else:
+                raise
         paths.append(path)
     return paths
