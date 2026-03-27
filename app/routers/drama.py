@@ -217,6 +217,22 @@ async def api_history(limit: int = 40):
     ]
 
 
+@router.delete("/history/{job_id}")
+async def api_history_delete(job_id: str):
+    """从视频墙删除一条记录，并删除 output/temp 下对应成片目录。"""
+    if not hist.is_safe_job_id(job_id):
+        raise HTTPException(status_code=400, detail="无效的 job_id")
+    ok = hist.delete_by_job_id(job_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="记录不存在")
+    hist.remove_job_artifacts(job_id)
+    if not settings.use_celery:
+        from app.queue.job_store import forget_job
+
+        forget_job(job_id)
+    return {"ok": True, "job_id": job_id}
+
+
 @router.post("/generate_short_drama", response_model=GenerateShortDramaResponse)
 async def generate_short_drama(req: GenerateShortDramaRequest):
     """同步生成（调试或小流量）。"""

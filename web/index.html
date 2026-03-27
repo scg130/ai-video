@@ -109,23 +109,175 @@
       max-width: 236px;
     }
     .preview video { width: 100%; height: 100%; object-fit: cover; display: block; }
-    .wall-title { font-size: 1.05rem; margin: 2rem 0 1rem; color: var(--muted); }
+    .wall-section {
+      margin-top: 2.25rem;
+      padding: 1.35rem 1.25rem 1.5rem;
+      background: linear-gradient(165deg, rgba(22, 22, 31, 0.95), rgba(15, 15, 22, 0.98));
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+    }
+    .wall-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.5rem 1rem;
+      margin-bottom: 1.25rem;
+      padding-bottom: 0.85rem;
+      border-bottom: 1px solid rgba(42, 42, 56, 0.8);
+    }
+    .wall-head h2 {
+      margin: 0;
+      font-size: 1.1rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      color: var(--text);
+      background: linear-gradient(90deg, #e8e6f0, var(--accent));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .wall-head p {
+      margin: 0;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
     .wall {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-      gap: 1rem;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 1.25rem;
+    }
+    @media (min-width: 900px) {
+      .wall { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+    }
+    .wall-empty {
+      grid-column: 1 / -1;
+      text-align: center;
+      padding: 2.5rem 1rem;
+      color: var(--muted);
+      font-size: 0.9rem;
+      border: 1px dashed var(--border);
+      border-radius: 12px;
+      background: rgba(15, 15, 22, 0.5);
     }
     .tile {
-      border-radius: 10px;
+      display: flex;
+      flex-direction: column;
+      border-radius: 14px;
       overflow: hidden;
-      border: 1px solid var(--border);
-      background: #0f0f16;
+      border: 1px solid rgba(42, 42, 56, 0.9);
+      background: #12121a;
+      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28);
+      transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
     }
-    .tile img { width: 100%; aspect-ratio: 9/16; object-fit: cover; display: block; }
-    .tile .meta { padding: 0.55rem 0.65rem; font-size: 0.75rem; }
-    .tile .theme { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .tile .subm { color: var(--muted); margin-top: 0.15rem; }
-    .tile video { width: 100%; display: block; margin-top: 0.35rem; }
+    .tile:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 14px 36px rgba(0, 0, 0, 0.45);
+      border-color: rgba(201, 162, 39, 0.35);
+    }
+    .tile-media {
+      position: relative;
+      aspect-ratio: 9 / 16;
+      background: linear-gradient(160deg, #1e1c2a, #0a0a10);
+      overflow: hidden;
+    }
+    .tile-media img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .tile-media--video video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      background: #000;
+    }
+    .tile-media--empty {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-size: 0.75rem;
+    }
+    .tile-body {
+      padding: 0.75rem 0.85rem 0.9rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.45rem;
+      flex: 1;
+      min-height: 0;
+    }
+    .tile-meta-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.5rem;
+    }
+    .tile-meta-top .theme {
+      flex: 1;
+      min-width: 0;
+      margin: 0;
+      font-size: 0.82rem;
+      font-weight: 600;
+      line-height: 1.35;
+      color: #f0eef8;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      white-space: normal;
+    }
+    .tile-del {
+      flex-shrink: 0;
+      padding: 0.2rem 0.5rem;
+      font-size: 0.68rem;
+      line-height: 1.2;
+      border-radius: 6px;
+      border: 1px solid rgba(196, 76, 76, 0.45);
+      background: transparent;
+      color: #c98a8a;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .tile-del:hover {
+      background: rgba(196, 76, 76, 0.2);
+      color: #ffb4b4;
+      border-color: var(--danger);
+    }
+    .tile-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.35rem 0.5rem;
+    }
+    .tile-tag {
+      font-size: 0.68rem;
+      color: var(--muted);
+      padding: 0.12rem 0.45rem;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(42, 42, 56, 0.7);
+    }
+    .tile-tag--accent {
+      color: var(--accent);
+      border-color: rgba(201, 162, 39, 0.35);
+      background: rgba(201, 162, 39, 0.08);
+    }
+    .tile-status {
+      font-size: 0.65rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+    }
+    .tile-status--ok { color: var(--ok); background: rgba(61, 158, 110, 0.12); }
+    .tile-status--fail { color: #e07070; background: rgba(196, 76, 76, 0.12); }
+    .tile-status--wait { color: var(--accent); background: rgba(201, 162, 39, 0.1); }
     .err { color: var(--danger); font-size: 0.88rem; margin-top: 0.5rem; }
     .warn { color: #c9a227; font-size: 0.88rem; margin-top: 0.5rem; line-height: 1.45; }
     .hint { font-size: 0.78rem; color: var(--muted); margin-top: 0.35rem; }
@@ -199,8 +351,13 @@
       </div>
     </div>
 
-    <h2 class="wall-title">视频墙 · 历史</h2>
-    <div class="wall" id="wall"></div>
+    <section class="wall-section" aria-label="历史成片">
+      <div class="wall-head">
+        <h2>视频墙 · 历史</h2>
+        <p id="wallHint">最近生成的短视频与状态</p>
+      </div>
+      <div class="wall" id="wall"></div>
+    </section>
   </div>
 
   <script>
@@ -230,26 +387,101 @@
       return t || res.statusText;
     }
 
+    function fmtWallTime(iso) {
+      if (!iso) return "";
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return "";
+      return d.toLocaleString("zh-CN", {
+        month: "numeric",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    }
+
+    function wallStatusUi(status) {
+      const map = {
+        completed: { cls: "tile-status--ok", label: "已完成" },
+        failed: { cls: "tile-status--fail", label: "失败" },
+        running: { cls: "tile-status--wait", label: "生成中" },
+        pending: { cls: "tile-status--wait", label: "排队中" },
+      };
+      const m = map[status] || { cls: "tile-status--wait", label: status || "—" };
+      return `<span class="tile-status ${m.cls}">${escapeHtml(m.label)}</span>`;
+    }
+
     async function loadHistory() {
       const res = await fetch("/api/history?limit=40");
       if (!res.ok) return;
       const items = await res.json();
-      $("wall").innerHTML = items.map((v) => {
-        const vid = v.video_url || "";
-        const cov = v.cover_url || "";
-        const st = v.status === "completed" ? "" : `<div class="subm">${escapeHtml(v.status)}</div>`;
-        return `
-          <div class="tile">
-            ${cov ? `<img src="${cov}" alt="" loading="lazy" />` : "<div style='aspect-ratio:9/16;background:#222'></div>"}
-            <div class="meta">
-              <div class="theme">${escapeHtml(v.theme)}</div>
-              <div class="subm">${escapeHtml(v.style)} · ${v.duration}s</div>
-              ${st}
-              ${vid && v.status === "completed" ? `<video src="${vid}" controls playsinline></video>` : ""}
+      const hint = $("wallHint");
+      if (hint) hint.textContent = items.length ? `共 ${items.length} 条` : "暂无记录";
+      if (!items.length) {
+        $("wall").innerHTML =
+          '<div class="wall-empty">还没有成片。完成一次「生成视频」后，会在这里显示预览与播放。</div>';
+        return;
+      }
+      $("wall").innerHTML = items
+        .map((v) => {
+          const vid = v.video_url || "";
+          const when = fmtWallTime(v.created_at);
+          let media;
+          if (vid && v.status === "completed") {
+            media = `<div class="tile-media tile-media--video"><video src="${vid}" controls playsinline preload="metadata"></video></div>`;
+          } else {
+            const label =
+              v.status === "failed"
+                ? "生成失败"
+                : v.status === "running"
+                  ? "生成中…"
+                  : v.status === "pending"
+                    ? "排队中"
+                    : "暂无成片";
+            media = `<div class="tile-media tile-media--empty">${escapeHtml(label)}</div>`;
+          }
+          return `
+          <article class="tile">
+            ${media}
+            <div class="tile-body">
+              <div class="tile-meta-top">
+                <h3 class="theme">${escapeHtml(v.theme)}</h3>
+                <button type="button" class="tile-del" data-job-id="${escapeHtml(v.job_id)}" title="删除此条与成片文件">删除</button>
+              </div>
+              <div class="tile-row">
+                <span class="tile-tag tile-tag--accent">${escapeHtml(v.style)}</span>
+                <span class="tile-tag">${v.duration}s</span>
+                ${when ? `<span class="tile-tag">${escapeHtml(when)}</span>` : ""}
+                ${wallStatusUi(v.status)}
+              </div>
             </div>
-          </div>`;
-      }).join("");
+          </article>`;
+        })
+        .join("");
     }
+
+    $("wall").addEventListener("click", async (e) => {
+      const btn = e.target.closest(".tile-del");
+      if (!btn) return;
+      e.preventDefault();
+      const jid = btn.getAttribute("data-job-id");
+      if (!jid) return;
+      if (!confirm("确定从视频墙删除？数据库记录与服务器上的成片目录将一并删除。")) return;
+      try {
+        const res = await fetch("/api/history/" + encodeURIComponent(jid), { method: "DELETE" });
+        if (!res.ok) {
+          alert(await readApiError(res));
+          return;
+        }
+        const pv = $("player");
+        if (pv && pv.src && pv.src.indexOf(jid) !== -1) {
+          pv.removeAttribute("src");
+          $("previewWrap").style.display = "none";
+        }
+        loadHistory();
+      } catch (err) {
+        alert(String(err));
+      }
+    });
 
     let pollTimer = null;
     function poll(jobId, delayMs = 2000) {

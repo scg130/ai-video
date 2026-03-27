@@ -46,3 +46,8 @@ def set_failed(job_id: str, error: str) -> None:
         _jobs[job_id].status = "failed"
         _jobs[job_id].error = error
         _jobs[job_id].updated_at = time.time()
+
+
+def forget_job(job_id: str) -> None:
+    """从内存队列状态中移除（用户删除历史后避免残留轮询）。"""
+    _jobs.pop(job_id, None)

@@ -1,10 +1,19 @@
 """videos 表：创建任务、更新状态、列表。"""
+import re
+import shutil
 from typing import Optional
 
 from sqlmodel import Session, select
 
+from app.config import settings
 from app.db import engine
 from app.db_models import Video
+
+_JOB_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{4,128}$")
+
+
+def is_safe_job_id(job_id: str) -> bool:
+    return bool(job_id and _JOB_ID_RE.fullmatch(job_id))
 
 
 def create_pending(job_id: str, theme: str, style: str, duration: int) -> None:
@@ -94,3 +103,29 @@ def list_recent(limit: int = 50, status: Optional[str] = None) -> list[Video]:
             stmt = stmt.where(Video.status == status)
         stmt = stmt.order_by(Video.created_at.desc()).limit(limit)
         return list(session.exec(stmt).all())
+
+
+def delete_by_job_id(job_id: str) -> bool:
+    """删除历史记录；返回是否删到一行。"""
+    if not is_safe_job_id(job_id):
+        return False
+    with Session(engine) as session:
+        row = session.exec(select(Video).where(Video.job_id == job_id)).first()
+        if not row:
+            return False
+        session.delete(row)
+        session.commit()
+        return True
+
+
+def remove_job_artifacts(job_id: str) -> None:
+    """删除 output/temp 下该 job 目录（仅当 job_id 安全）。"""
+    if not is_safe_job_id(job_id):
+        return
+    for base in (settings.output_path, settings.temp_path):
+        d = base / job_id
+        try:
+            if d.is_dir():
+                shutil.rmtree(d, ignore_errors=True)
+        except OSError:
+            pass
