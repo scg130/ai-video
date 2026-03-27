@@ -101,9 +101,13 @@ Content-Type: application/json
   "theme": "斩仙台复仇",
   "style": "爽文",
   "duration": 60,
-  "synopsis": "主角被诬上斩仙台，真相反转后反杀仇敌。"
+  "synopsis": "主角被诬上斩仙台，真相反转后反杀仇敌。",
+  "series_id": "zx_001",
+  "episode": 3
 }
 ```
+
+`series_id` + `episode`（可选）：连续剧模式——从 Chroma 拉同系列历史，生成第 N 集（承接、不重复、冲突升级），并把本集摘要写回记忆。
 
 响应体含 `script`（分镜数组），与 `generate_video` 的 `script` 格式一致。  
 **失败兜底**：仍返回 **HTTP 200**，`ok: false`、`fallback: true`，`script` 为可编辑占位分镜，`error_code`（如 `openai_unavailable` / `draft_failed`）与 `message` 说明原因。

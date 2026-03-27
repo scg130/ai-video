@@ -61,6 +61,8 @@ async def run_pipeline(
     bgm_path: Optional[Path] = None,
     job_id: Optional[str] = None,
     scenes: Optional[list[dict[str, Any]]] = None,
+    series_id: Optional[str] = None,
+    episode: int = 1,
 ) -> tuple[Path, Path, list[dict]]:
     jid = job_id or uuid.uuid4().hex[:12]
     temp_dir = settings.temp_path / jid
@@ -74,7 +76,14 @@ async def run_pipeline(
         loop = asyncio.get_event_loop()
         try:
             scenes = await loop.run_in_executor(
-                None, lambda: generate_script(theme=theme, style=style, duration=duration)
+                None,
+                lambda: generate_script(
+                    theme=theme,
+                    style=style,
+                    duration=duration,
+                    series_id=series_id,
+                    episode=max(1, int(episode)),
+                ),
             )
         except Exception:
             if _pipeline_tolerant():

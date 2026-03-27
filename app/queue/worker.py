@@ -25,6 +25,8 @@ async def _run_job(
     duration: int,
     bgm: Optional[Path] = None,
     scenes: Optional[list[dict[str, Any]]] = None,
+    series_id: Optional[str] = None,
+    episode: int = 1,
 ) -> None:
     async with _sem():
         hist.mark_running(job_id)
@@ -37,6 +39,8 @@ async def _run_job(
                 bgm_path=bgm,
                 job_id=job_id,
                 scenes=scenes,
+                series_id=series_id,
+                episode=episode,
             )
             video_url = f"/static/{v.parent.name}/{v.name}"
             cover_url = f"/static/{c.parent.name}/{c.name}"
@@ -55,9 +59,13 @@ def enqueue_async(
     style: str,
     duration: int,
     scenes: Optional[list[dict[str, Any]]] = None,
+    series_id: Optional[str] = None,
+    episode: int = 1,
 ) -> str:
     job_id = uuid.uuid4().hex[:12]
     hist.create_pending(job_id, theme, style, duration)
     create_job(job_id, theme, style, duration)
-    asyncio.create_task(_run_job(job_id, theme, style, duration, None, scenes))
+    asyncio.create_task(
+        _run_job(job_id, theme, style, duration, None, scenes, series_id, episode)
+    )
     return job_id

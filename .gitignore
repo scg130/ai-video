@@ -4,5 +4,8 @@ output/
 temp/
 chroma_db/
 data/
-app/__pycache__/*
-app/services/__pycache__/*
+
+# Python（字节码 .pyc / .pyo 等）
+__pycache__/
+*.py[cod]
+*$py.class

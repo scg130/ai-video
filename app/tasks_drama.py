@@ -12,6 +12,8 @@ def generate_drama_task(
     style: str,
     duration: int,
     script: Optional[list[dict[str, Any]]] = None,
+    series_id: Optional[str] = None,
+    episode: int = 1,
 ) -> dict:
     from app.crud import history as hist
     from app.services.pipeline_service import run_pipeline
@@ -27,6 +29,8 @@ def generate_drama_task(
                 bgm_path=None,
                 job_id=job_id,
                 scenes=script,
+                series_id=series_id,
+                episode=episode or 1,
             )
         )
         video_url = f"/static/{v.parent.name}/{v.name}"

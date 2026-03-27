@@ -46,8 +46,12 @@ def _enqueue_pipeline(
     style: str,
     duration: int,
     script: list | None = None,
+    series_id: str | None = None,
+    episode: int = 1,
 ) -> str:
-    """script=None：服务端现写剧本；否则使用用户提交的剧本。"""
+    """script=None：服务端现写剧本；否则使用用户提交的剧本。series_id+episode 用于连续剧 Chroma。"""
+    sid = (series_id or "").strip() or None
+    ep = max(1, int(episode))
     if settings.use_celery:
         try:
             from app.tasks_drama import generate_drama_task
@@ -56,14 +60,14 @@ def _enqueue_pipeline(
         job_id = uuid.uuid4().hex
         hist.create_pending(job_id, theme, style, duration)
         generate_drama_task.apply_async(
-            args=(theme, style, duration, script),
+            args=(theme, style, duration, script, sid, ep),
             task_id=job_id,
         )
         return job_id
 
     from app.queue.worker import enqueue_async
 
-    return enqueue_async(theme, style, duration, script)
+    return enqueue_async(theme, style, duration, script, sid, ep)
 
 
 def _map_public_status(internal: str) -> str:
@@ -91,6 +95,8 @@ async def api_script_draft(req: DraftScriptRequest):
                 style=req.style,
                 duration=req.duration,
                 synopsis=req.synopsis or None,
+                series_id=(req.series_id or "").strip() or None,
+                episode=max(1, int(req.episode)),
             ),
         )
         return DraftScriptResponse(script=scenes)
@@ -138,7 +144,14 @@ async def api_generate(req: GenerateShortDramaRequest):
     一键异步（不写简介、不经过编辑）：服务端自动生成剧本再出片。
     若要走「简介→编辑→出片」，请用 /api/script/draft + /api/generate_video。
     """
-    job_id = _enqueue_pipeline(req.theme, req.style, req.duration, None)
+    job_id = _enqueue_pipeline(
+        req.theme,
+        req.style,
+        req.duration,
+        None,
+        (req.series_id or "").strip() or None,
+        max(1, int(req.episode)),
+    )
     return GenerateApiResponse(job_id=job_id)
 
 
@@ -213,6 +226,8 @@ async def generate_short_drama(req: GenerateShortDramaRequest):
             style=req.style,
             duration=req.duration,
             bgm_path=None,
+            series_id=(req.series_id or "").strip() or None,
+            episode=max(1, int(req.episode)),
         )
     except (OpenAINoKeysError, OpenAIAllKeysFailedError) as e:
         raise _openai_unavailable_response(e) from e
@@ -239,7 +254,14 @@ async def generate_short_drama(req: GenerateShortDramaRequest):
 @router.post("/jobs", response_model=JobEnqueueResponse)
 async def enqueue_job(req: GenerateShortDramaRequest):
     """兼容旧路径，等价于 POST /api/generate（自动生成剧本）。"""
-    job_id = _enqueue_pipeline(req.theme, req.style, req.duration, None)
+    job_id = _enqueue_pipeline(
+        req.theme,
+        req.style,
+        req.duration,
+        None,
+        (req.series_id or "").strip() or None,
+        max(1, int(req.episode)),
+    )
     return JobEnqueueResponse(job_id=job_id)
 
 

@@ -18,6 +18,8 @@ class GenerateShortDramaRequest(BaseModel):
     theme: str = Field(default="斩仙台复仇", description="题材关键词")
     style: str = Field(default="爽文", description="风格：爽文、反转、打脸等")
     duration: int = Field(default=60, ge=30, le=120, description="时长秒数")
+    series_id: str = Field(default="", description="连续剧 ID，与 episode 配合走 Chroma 记忆")
+    episode: int = Field(default=1, ge=1, description="第几集（第 1 集也会写入记忆）")
 
 
 class GenerateShortDramaResponse(BaseModel):
@@ -70,6 +72,8 @@ class DraftScriptRequest(BaseModel):
     style: str = Field(default="爽文", description="风格")
     synopsis: str = Field(default="", description="故事简介，越具体越好")
     duration: int = Field(default=60, ge=30, le=120, description="目标总时长（秒）")
+    series_id: str = Field(default="", description="连续剧 ID（可选），用于检索历史与写回记忆")
+    episode: int = Field(default=1, ge=1, description="第几集")
 
 
 class DraftScriptResponse(BaseModel):
