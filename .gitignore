@@ -5,7 +5,11 @@ temp/
 chroma_db/
 data/
 
-# Python（字节码 .pyc / .pyo 等）
+# Python：仅对「未跟踪」文件生效；已提交的 .pyc 须先 git rm --cached
+**/__pycache__/
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
 *.py[cod]
 *$py.class
