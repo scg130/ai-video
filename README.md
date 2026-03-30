@@ -4,6 +4,8 @@
 
 ## 架构
 
+**成片流水线**由 [LangGraph](https://github.com/langchain-ai/langgraph) 编排（`app/graph/pipeline_graph.py`）：`init_paths` → `load_script` → `subtitles` → 按 `VISUAL_MODE` 条件分支（`media_cog` / `media_ad` / `media_img`）→ `assemble_*` → `finalize_cover`。对外仍通过 `app.services.pipeline_service.run_pipeline` 调用，行为与改造前一致，后续可在此图上扩展检查点、重试策略或人工审核节点。
+
 ```
 输入 theme / style / duration / synopsis（故事简介）
         ↓

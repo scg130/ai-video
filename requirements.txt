@@ -7,6 +7,8 @@ sqlmodel>=0.0.14
 openai>=1.12.0
 langchain>=0.1.0
 langchain-openai>=0.0.5
+langgraph>=0.2.0
+typing_extensions>=4.8.0
 
 # Optional: 剧情风格记忆
 chromadb>=0.4.22
