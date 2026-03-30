@@ -17,15 +17,19 @@ from app.schemas import (
     HistoryVideoItem,
     JobEnqueueResponse,
     JobStatusResponse,
+    OneLinerExpandRequest,
+    OneLinerExpandResponse,
     PublicStatusResponse,
 )
 from app.services.openai_keys import OpenAIAllKeysFailedError, OpenAINoKeysError
 from app.services.pipeline_service import run_pipeline
 from app.services.script_service import (
     build_fallback_draft_scenes,
+    expand_from_one_liner,
     generate_script,
     normalize_scenes_list,
 )
+from app.services.visual_prompt import build_visual_prompt
 
 
 def _openai_unavailable_response(exc: Exception) -> HTTPException:
@@ -120,6 +124,60 @@ async def api_script_draft(req: DraftScriptRequest):
             ok=False,
             fallback=True,
             error_code="draft_failed",
+            message=str(e),
+        )
+
+
+def _fallback_one_liner_scenes(line: str, style: str, duration: int) -> list[dict]:
+    theme = line[:24] if len(line) > 24 else line or "短剧"
+    fb = build_fallback_draft_scenes(theme, style, duration, line or None)
+    out: list[dict] = []
+    for n in fb:
+        d = str(n.get("dialogue") or "").strip() or "……"
+        out.append(
+            {
+                **n,
+                "image_prompt": build_visual_prompt(n)[:4000],
+                "voice_text": d[:4096],
+            }
+        )
+    return out
+
+
+@router.post("/script/from-one-liner", response_model=OneLinerExpandResponse)
+async def api_script_from_one_liner(req: OneLinerExpandRequest):
+    """
+    一句话扩写：返回剧本梗概、分镜列表；每镜含 image_prompt（文生图）、voice_text（配音）。
+    失败时 HTTP 200 + ok=false、fallback=true，body 仍为可编辑占位。
+    """
+    line = (req.line or "").strip()
+    if not line:
+        raise HTTPException(status_code=400, detail="line 不能为空")
+    loop = asyncio.get_event_loop()
+    try:
+        out = await loop.run_in_executor(
+            None,
+            lambda: expand_from_one_liner(line=line, style=req.style, duration=req.duration),
+        )
+        return OneLinerExpandResponse(script=out["script"], scenes=out["scenes"])
+    except (OpenAINoKeysError, OpenAIAllKeysFailedError) as e:
+        scenes = _fallback_one_liner_scenes(line, req.style, req.duration)
+        return OneLinerExpandResponse(
+            script=line,
+            scenes=scenes,
+            ok=False,
+            fallback=True,
+            error_code="openai_unavailable",
+            message=str(e),
+        )
+    except Exception as e:
+        scenes = _fallback_one_liner_scenes(line, req.style, req.duration)
+        return OneLinerExpandResponse(
+            script=line,
+            scenes=scenes,
+            ok=False,
+            fallback=True,
+            error_code="expand_failed",
             message=str(e),
         )
 

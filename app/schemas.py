@@ -84,6 +84,24 @@ class DraftScriptResponse(BaseModel):
     message: Optional[str] = Field(default=None, description="失败简述；成功时一般为 null")
 
 
+class OneLinerExpandRequest(BaseModel):
+    """一句话扩写：剧本 + 分镜 + 每镜文生图 prompt + 配音文案。"""
+    line: str = Field(..., description="一句话创意或梗概")
+    style: str = Field(default="爽文", description="风格")
+    duration: int = Field(default=60, ge=30, le=120, description="目标总时长（秒）")
+
+
+class OneLinerExpandResponse(BaseModel):
+    script: str = Field(description="剧本梗概（扩写后的正文）")
+    scenes: list[dict[str, Any]] = Field(
+        description="分镜列表；每项含 time, scene, camera, dialogue, emotion, role, image_prompt, voice_text"
+    )
+    ok: bool = Field(default=True, description="大模型是否成功；false 时为兜底")
+    fallback: bool = Field(default=False, description="true 表示兜底占位，需用户改写")
+    error_code: Optional[str] = Field(default=None, description="失败原因码")
+    message: Optional[str] = Field(default=None, description="失败简述")
+
+
 class GenerateVideoRequest(BaseModel):
     """用户确认/编辑后的剧本 + 元数据，异步生成成片（第二步）。"""
     theme: str = Field(..., description="主题（入历史库）")

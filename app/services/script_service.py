@@ -11,6 +11,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from app.config import settings
 from app.services import rag_service
 from app.services.openai_keys import run_with_key_rotation
+from app.services.visual_prompt import build_visual_prompt
 
 DIRECTOR_SYSTEM = """你是短视频爽文导演，擅长抖音爆款修仙复仇剧情。
 
@@ -67,6 +68,91 @@ LEGACY_PROMPT = """生成一个短视频剧本，题材：{theme}，风格：{st
 每个分镜：scene, camera, dialogue（短）, emotion, role（主角/反派/女主/路人/旁白）。
 只输出 JSON 数组。
 {rag_block}"""
+
+ONE_LINER_USER = """用户只给了一句话作为短视频创意：
+「___LINE___」
+
+风格：___STYLE___，目标总时长约 ___DURATION___ 秒，分镜约 ___NUM_SCENES___ 个（每约 5 秒一镜，**首镜建议 time 为 0-3s**）。
+
+请只输出**一个 JSON 对象**（不要用 markdown 代码围栏），结构严格如下：
+{{
+  "script": "剧本梗概：用 2～4 小段讲清人物、核心冲突、反转与收束，适合竖屏短剧。",
+  "scenes": [
+    {{
+      "time": "0-3s",
+      "scene": "画面：环境+人物动作，简练",
+      "camera": "镜头语言，如俯视+慢推、特写",
+      "dialogue": "台词，尽量短",
+      "emotion": "情绪",
+      "role": "主角|反派|女主|路人|旁白",
+      "image_prompt": "本镜文生图提示词：英文为主，含 cinematic lighting、景别与画面主体，可直接喂给 DALL·E/SD",
+      "voice_text": "本镜配音全文：可与 dialogue 相同；无台词镜可写「……」或短旁白"
+    }}
+  ]
+}}
+
+硬性要求：scenes 长度与 num_scenes 一致或接近；每镜 image_prompt、voice_text 必须非空。"""
+
+
+def _one_liner_prompt(line: str, style: str, duration: int, num_scenes: int) -> str:
+    return (
+        ONE_LINER_USER.replace("___LINE___", line)
+        .replace("___STYLE___", style)
+        .replace("___DURATION___", str(duration))
+        .replace("___NUM_SCENES___", str(num_scenes))
+    )
+
+
+def expand_from_one_liner(
+    line: str,
+    style: str = "爽文",
+    duration: int = 60,
+) -> dict[str, Any]:
+    """
+    一句话扩写：返回剧本梗概 script + 分镜列表，每镜含 image_prompt、voice_text。
+    """
+    line = (line or "").strip()
+    if not line:
+        raise ValueError("一句话不能为空")
+    duration = max(30, min(120, int(duration)))
+    num_scenes = max(1, duration // 5)
+    content = _invoke_llm(DIRECTOR_SYSTEM, _one_liner_prompt(line, style, duration, num_scenes))
+    obj = _parse_json_object(content)
+    script_text = str(obj.get("script") or "").strip()
+    if not script_text:
+        script_text = line
+    raw_scenes = obj.get("scenes")
+    if not isinstance(raw_scenes, list):
+        raw_scenes = []
+
+    scenes_out: list[dict[str, Any]] = []
+    for i, s in enumerate(raw_scenes):
+        if not isinstance(s, dict):
+            continue
+        norm = _normalize_scene(i, s)
+        img_p = str(s.get("image_prompt") or "").strip()
+        if not img_p:
+            img_p = build_visual_prompt(norm)
+        voice = str(s.get("voice_text") or "").strip() or str(norm.get("dialogue") or "").strip()
+        if not voice:
+            voice = "……"
+        scenes_out.append(
+            {
+                **norm,
+                "image_prompt": img_p[:4000],
+                "voice_text": voice[:4096],
+            }
+        )
+
+    if not scenes_out:
+        theme = line[:24] if len(line) > 24 else line
+        fb = build_fallback_draft_scenes(theme, style, duration, line)
+        for i, n in enumerate(fb):
+            vp = build_visual_prompt(n)
+            d = str(n.get("dialogue") or "").strip() or "……"
+            scenes_out.append({**n, "image_prompt": vp[:4000], "voice_text": d[:4096]})
+
+    return {"script": script_text, "scenes": scenes_out}
 
 
 def _parse_json_object(text: str) -> dict[str, Any]:
@@ -223,7 +309,7 @@ def _invoke_openai_llm_with_429_backoff(system: str, user: str) -> str:
         for attempt in range(max_r):
             try:
                 llm = ChatOpenAI(
-                    model=getattr(settings, "openai_script_model", "gpt-4o-mini"),
+                    model=getattr(settings, "openai_script_model", "gpt-4o"),
                     api_key=api_key,
                     temperature=0.85,
                     timeout=120.0,
