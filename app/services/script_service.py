@@ -19,17 +19,13 @@ from app.services.visual_prompt import build_visual_prompt
 _ERR_LOCAL_SCENES_PARSE = (
     "未能解析出分镜。请确认 Ollama 已启动、模型已 pull；"
     "pip install -r requirements.txt（含 json-repair）；"
-    "或增大模型（如 qwen2.5:3b）、调高 LOCAL_LLM_PROMPT_MAX_SCENES。"
+    "或换用更大模型（如 qwen2.5:3b）。"
 )
 
 
-def _local_prompt_cap_num_scenes(duration: int) -> int:
-    """local 模式下限制提示里的分镜个数，减轻小模型输出截断/乱 JSON。"""
-    n = max(1, int(duration) // 5)
-    if (getattr(settings, "script_llm_mode", "") or "").lower().strip() != "local":
-        return n
-    cap = max(3, int(getattr(settings, "local_llm_prompt_max_scenes", 8) or 8))
-    return min(n, cap)
+def _num_scenes_for_duration(duration: int) -> int:
+    """按总时长估算分镜条数（约每 5 秒一镜）。"""
+    return max(1, int(duration) // 5)
 
 
 def _ollama_root_from_openai_base_url(base: str) -> Optional[str]:
@@ -201,7 +197,7 @@ def expand_from_one_liner(
     if not line:
         raise ValueError("一句话不能为空")
     duration = max(30, min(120, int(duration)))
-    num_scenes = _local_prompt_cap_num_scenes(duration)
+    num_scenes = _num_scenes_for_duration(duration)
     prompt = _one_liner_prompt(line, style, duration, num_scenes)
     content = _invoke_script_llm(DIRECTOR_SYSTEM, prompt, qwen_only=qwen_only)
     obj = _parse_json_object(content)
@@ -1113,7 +1109,7 @@ def generate_script(
     series_id + episode：连续剧模式，从 Chroma 拉历史并写回本集摘要。
     qwen_only：为 True 时整段只调用兜底 Qwen（主模型失败后的重试）。
     """
-    num_scenes = _local_prompt_cap_num_scenes(duration)
+    num_scenes = _num_scenes_for_duration(duration)
     syn_sec = _synopsis_section(synopsis)
     ser_sec = _series_section(series_id, episode)
     ep = max(1, int(episode))

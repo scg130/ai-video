@@ -48,8 +48,6 @@ class Settings(BaseSettings):
     local_llm_json_response: bool = True
     # 检测到 Ollama 时优先走原生 /api/chat（比 OpenAI 兼容层更易得到合法 JSON）
     local_llm_use_native_ollama: bool = True
-    # local 模式下写入提示的「分镜个数」上限（减轻 0.5b 等小模型压力）
-    local_llm_prompt_max_scenes: int = 8
     # OpenAI 剧本：遇 429 时同一 Key 指数退避重试次数（之后再换 Key）
     script_openai_429_max_retries: int = 4
     script_openai_429_base_delay_sec: float = 2.0
@@ -211,13 +209,6 @@ class Settings(BaseSettings):
                 "local_llm_use_native_ollama",
                 lno.lower() in ("1", "true", "yes", "on"),
             )
-        lms = _nz("LOCAL_LLM_PROMPT_MAX_SCENES")
-        if lms is not None:
-            try:
-                object.__setattr__(self, "local_llm_prompt_max_scenes", int(lms))
-            except ValueError:
-                pass
-
         qb = _nz("QWEN_BASE_URL")
         if qb is not None:
             object.__setattr__(self, "qwen_base_url", qb)
