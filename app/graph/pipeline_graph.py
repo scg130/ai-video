@@ -17,9 +17,10 @@ from typing_extensions import TypedDict
 from app.config import settings
 from app.services.media_fallback import placeholder_mp4
 from app.services.script_service import (
-    build_fallback_draft_scenes,
     generate_script,
     normalize_scenes_list,
+    qwen_configured,
+    script_llm_mode_is_local,
 )
 from app.services.subtitle_service import to_srt
 from app.services.tts_service import generate_tts_for_scenes
@@ -102,9 +103,21 @@ async def node_load_script(state: DramaState) -> dict[str, Any]:
                 ),
             )
         except Exception:
-            if _pipeline_tolerant():
-                scenes = build_fallback_draft_scenes(
-                    state["theme"], state["style"], state["duration"], None
+            if (
+                _pipeline_tolerant()
+                and qwen_configured()
+                and not script_llm_mode_is_local()
+            ):
+                scenes = await loop.run_in_executor(
+                    None,
+                    lambda: generate_script(
+                        theme=state["theme"],
+                        style=state["style"],
+                        duration=state["duration"],
+                        series_id=state.get("series_id"),
+                        episode=max(1, int(state.get("episode") or 1)),
+                        qwen_only=True,
+                    ),
                 )
             else:
                 raise

@@ -1,11 +1,29 @@
 """应用配置"""
-from pathlib import Path
+from __future__ import annotations
 
+import os
+from pathlib import Path
+from typing import Optional
+
+from dotenv import dotenv_values
+from pydantic import field_validator, model_validator
+from typing_extensions import Self
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _resolved_dotenv_path() -> Optional[Path]:
+    """与加载 Settings 时一致：相对 AI_VIDEO_ENV_FILE / .env 相对进程 cwd。"""
+    raw = Path(os.environ.get("AI_VIDEO_ENV_FILE", ".env")).expanduser()
+    candidate = raw if raw.is_absolute() else Path.cwd() / raw
+    return candidate if candidate.is_file() else None
+
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8-sig",
+        extra="ignore",
+    )
 
     # GPT（OPENAI_API_KEY 单 Key；OPENAI_API_KEYS 多 Key，逗号/空格/换行分隔，与单 Key 二选一或合并列表）
     openai_api_key: str = ""
@@ -16,14 +34,31 @@ class Settings(BaseSettings):
     script_two_step: bool = True
     # 剧本 LLM：openai | local | openai_fallback_local（OpenAI 失败再试本地）
     script_llm_mode: str = "openai"
+    # true：LLM 相关以系统环境变量为准（pydantic 默认，适合 Docker/K8s）
+    # false（默认）：从 cwd 下 .env 回写 SCRIPT_LLM_MODE、LOCAL_LLM_*、QWEN_*（避免 shell 里旧 export 盖住 .env）
+    script_llm_mode_strict: bool = False
     # 本地 OpenAI 兼容接口（如 Ollama：http://127.0.0.1:11434/v1 ）
     local_llm_base_url: str = ""
     local_llm_model: str = "llama3.2"
     local_llm_api_key: str = "ollama"
     local_llm_timeout_sec: float = 120.0
+    # 本地剧本生成温度（宜偏低，便于输出合法 JSON）
+    local_llm_script_temperature: float = 0.35
+    # 对 Ollama 兼容接口传 format=json（部分版本支持；不支持时由服务端忽略）
+    local_llm_json_response: bool = True
+    # 检测到 Ollama 时优先走原生 /api/chat（比 OpenAI 兼容层更易得到合法 JSON）
+    local_llm_use_native_ollama: bool = True
+    # local 模式下写入提示的「分镜个数」上限（减轻 0.5b 等小模型压力）
+    local_llm_prompt_max_scenes: int = 8
     # OpenAI 剧本：遇 429 时同一 Key 指数退避重试次数（之后再换 Key）
     script_openai_429_max_retries: int = 4
     script_openai_429_base_delay_sec: float = 2.0
+
+    # 剧本兜底 LLM：默认本地 Qwen 小模型（Ollama /v1）；可改云上兼容地址并填 QWEN_API_KEY
+    qwen_api_key: str = ""
+    qwen_base_url: str = "http://127.0.0.1:11434/v1"
+    qwen_script_model: str = "qwen:0.5b"
+    qwen_timeout_sec: float = 180.0
 
     # 流水线容错：单镜图/音/视频失败时用占位，尽量仍导出成片
     pipeline_fault_tolerant: bool = True
@@ -110,6 +145,96 @@ class Settings(BaseSettings):
 
     # SQLite 历史（视频墙）
     database_url: str = "sqlite:///./data/videos.db"
+
+    @field_validator("script_llm_mode", mode="before")
+    @classmethod
+    def _normalize_script_llm_mode(cls, v: object) -> str:
+        if v is None:
+            return "openai"
+        s = str(v).replace("\ufeff", "").strip().lower()
+        return s if s else "openai"
+
+    @model_validator(mode="after")
+    def _dotenv_overrides_for_llm_fields(self) -> Self:
+        if self.script_llm_mode_strict:
+            return self
+        env_path = _resolved_dotenv_path()
+        if not env_path:
+            return self
+        vals = dotenv_values(env_path)
+
+        def _nz(key: str) -> str | None:
+            v = vals.get(key)
+            if v is None:
+                return None
+            s = str(v).replace("\ufeff", "").strip()
+            return s if s else None
+
+        raw_mode = _nz("SCRIPT_LLM_MODE")
+        if raw_mode is not None:
+            s = raw_mode.lower()
+            if s in ("openai", "local", "openai_fallback_local"):
+                object.__setattr__(self, "script_llm_mode", s)
+
+        bu = _nz("LOCAL_LLM_BASE_URL")
+        if bu is not None:
+            object.__setattr__(self, "local_llm_base_url", bu)
+        lm = _nz("LOCAL_LLM_MODEL")
+        if lm is not None:
+            object.__setattr__(self, "local_llm_model", lm)
+        ak = _nz("LOCAL_LLM_API_KEY")
+        if ak is not None:
+            object.__setattr__(self, "local_llm_api_key", ak)
+        to = _nz("LOCAL_LLM_TIMEOUT_SEC")
+        if to is not None:
+            try:
+                object.__setattr__(self, "local_llm_timeout_sec", float(to))
+            except ValueError:
+                pass
+        stmp = _nz("LOCAL_LLM_SCRIPT_TEMPERATURE")
+        if stmp is not None:
+            try:
+                object.__setattr__(self, "local_llm_script_temperature", float(stmp))
+            except ValueError:
+                pass
+        ljr = _nz("LOCAL_LLM_JSON_RESPONSE")
+        if ljr is not None:
+            object.__setattr__(
+                self,
+                "local_llm_json_response",
+                ljr.lower() in ("1", "true", "yes", "on"),
+            )
+        lno = _nz("LOCAL_LLM_USE_NATIVE_OLLAMA")
+        if lno is not None:
+            object.__setattr__(
+                self,
+                "local_llm_use_native_ollama",
+                lno.lower() in ("1", "true", "yes", "on"),
+            )
+        lms = _nz("LOCAL_LLM_PROMPT_MAX_SCENES")
+        if lms is not None:
+            try:
+                object.__setattr__(self, "local_llm_prompt_max_scenes", int(lms))
+            except ValueError:
+                pass
+
+        qb = _nz("QWEN_BASE_URL")
+        if qb is not None:
+            object.__setattr__(self, "qwen_base_url", qb)
+        qm = _nz("QWEN_SCRIPT_MODEL")
+        if qm is not None:
+            object.__setattr__(self, "qwen_script_model", qm)
+        qk = _nz("QWEN_API_KEY")
+        if qk is not None:
+            object.__setattr__(self, "qwen_api_key", qk)
+        qt = _nz("QWEN_TIMEOUT_SEC")
+        if qt is not None:
+            try:
+                object.__setattr__(self, "qwen_timeout_sec", float(qt))
+            except ValueError:
+                pass
+
+        return self
 
     @property
     def output_path(self) -> Path:

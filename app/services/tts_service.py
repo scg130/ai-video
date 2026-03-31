@@ -7,6 +7,7 @@ import httpx
 from openai import AsyncOpenAI
 
 from app.config import settings
+from app.services.model_debug_io import print_model_io
 from app.services.openai_keys import async_run_with_key_rotation
 
 # OpenAI TTS voice：主角低沉、反派偏锐、女主柔和、旁白中性
@@ -50,7 +51,13 @@ async def _tts_openai(
                     voice=voice,
                     input=text[:4096],
                 )
-                path.write_bytes(resp.content)
+                audio = resp.content
+                path.write_bytes(audio)
+                print_model_io(
+                    f"OpenAI TTS 分镜[{i}]",
+                    f"model=tts-1 voice={voice}\ninput=\n{text[:4096]}",
+                    f"file={path}\nbytes={len(audio)}",
+                )
                 paths.append(path)
             except Exception:
                 if tolerant:
@@ -90,7 +97,13 @@ async def _tts_internal_api(
                     headers={"Authorization": f"Bearer {settings.tts_api_key}"} if settings.tts_api_key else {},
                 )
                 r.raise_for_status()
-                path.write_bytes(r.content)
+                audio = r.content
+                path.write_bytes(audio)
+                print_model_io(
+                    f"内部TTS API 分镜[{i}]",
+                    f"POST {base}/tts\n{payload}",
+                    f"file={path}\nbytes={len(audio)}",
+                )
                 paths.append(path)
             except Exception:
                 if tolerant:

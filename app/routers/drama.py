@@ -23,13 +23,7 @@ from app.schemas import (
 )
 from app.services.openai_keys import OpenAIAllKeysFailedError, OpenAINoKeysError
 from app.services.pipeline_service import run_pipeline
-from app.services.script_service import (
-    build_fallback_draft_scenes,
-    expand_from_one_liner,
-    generate_script,
-    normalize_scenes_list,
-)
-from app.services.visual_prompt import build_visual_prompt
+from app.services.script_service import expand_from_one_liner, generate_script, normalize_scenes_list
 
 
 def _openai_unavailable_response(exc: Exception) -> HTTPException:
@@ -88,7 +82,7 @@ def _map_public_status(internal: str) -> str:
 async def api_script_draft(req: DraftScriptRequest):
     """
     第一步：根据主题、风格、故事简介由大模型生成分镜剧本。
-    失败时仍返回 HTTP 200，script 为可编辑兜底分镜，并带 ok=false / fallback=true。
+    主模型失败或解析为空时会尝试 QWEN_* 兜底；仍失败则 503。
     """
     loop = asyncio.get_event_loop()
     try:
@@ -104,51 +98,22 @@ async def api_script_draft(req: DraftScriptRequest):
             ),
         )
         return DraftScriptResponse(script=scenes)
-    except (OpenAINoKeysError, OpenAIAllKeysFailedError) as e:
-        fb = build_fallback_draft_scenes(
-            req.theme, req.style, req.duration, req.synopsis or None
-        )
-        return DraftScriptResponse(
-            script=fb,
-            ok=False,
-            fallback=True,
-            error_code="openai_unavailable",
-            message=str(e),
-        )
     except Exception as e:
-        fb = build_fallback_draft_scenes(
-            req.theme, req.style, req.duration, req.synopsis or None
-        )
-        return DraftScriptResponse(
-            script=fb,
-            ok=False,
-            fallback=True,
-            error_code="draft_failed",
-            message=str(e),
-        )
-
-
-def _fallback_one_liner_scenes(line: str, style: str, duration: int) -> list[dict]:
-    theme = line[:24] if len(line) > 24 else line or "短剧"
-    fb = build_fallback_draft_scenes(theme, style, duration, line or None)
-    out: list[dict] = []
-    for n in fb:
-        d = str(n.get("dialogue") or "").strip() or "……"
-        out.append(
-            {
-                **n,
-                "image_prompt": build_visual_prompt(n)[:4000],
-                "voice_text": d[:4096],
-            }
-        )
-    return out
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "draft_failed",
+                "message": str(e),
+                "script": [],
+            },
+        ) from e
 
 
 @router.post("/script/from-one-liner", response_model=OneLinerExpandResponse)
 async def api_script_from_one_liner(req: OneLinerExpandRequest):
     """
-    一句话扩写：返回剧本梗概、分镜列表；每镜含 image_prompt（文生图）、voice_text（配音）。
-    失败时 HTTP 200 + ok=false、fallback=true，body 仍为可编辑占位。
+    一句话扩写：返回剧本梗概、分镜列表；每镜含 image_prompt、voice_text。
+    失败返回 503。
     """
     line = (req.line or "").strip()
     if not line:
@@ -160,26 +125,14 @@ async def api_script_from_one_liner(req: OneLinerExpandRequest):
             lambda: expand_from_one_liner(line=line, style=req.style, duration=req.duration),
         )
         return OneLinerExpandResponse(script=out["script"], scenes=out["scenes"])
-    except (OpenAINoKeysError, OpenAIAllKeysFailedError) as e:
-        scenes = _fallback_one_liner_scenes(line, req.style, req.duration)
-        return OneLinerExpandResponse(
-            script=line,
-            scenes=scenes,
-            ok=False,
-            fallback=True,
-            error_code="openai_unavailable",
-            message=str(e),
-        )
     except Exception as e:
-        scenes = _fallback_one_liner_scenes(line, req.style, req.duration)
-        return OneLinerExpandResponse(
-            script=line,
-            scenes=scenes,
-            ok=False,
-            fallback=True,
-            error_code="expand_failed",
-            message=str(e),
-        )
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "expand_failed",
+                "message": str(e),
+            },
+        ) from e
 
 
 @router.post("/generate_video", response_model=GenerateApiResponse)

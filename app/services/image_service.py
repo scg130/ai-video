@@ -7,6 +7,7 @@ from openai import AsyncOpenAI
 
 from app.config import settings
 from app.services.media_fallback import placeholder_png
+from app.services.model_debug_io import print_model_io
 from app.services.openai_keys import async_run_with_key_rotation
 from app.services.visual_prompt import build_visual_prompt
 
@@ -39,7 +40,13 @@ async def _generate_image_openai(prompt: str, out_path: Path) -> None:
         async with httpx.AsyncClient() as client_http:
             r = await client_http.get(url)
             r.raise_for_status()
-            out_path.write_bytes(r.content)
+            body = r.content
+            out_path.write_bytes(body)
+        print_model_io(
+            "OpenAI DALL·E 文生图",
+            f"model=dall-e-3 size=1024x1792 quality=standard n=1\nprompt=\n{full_prompt[:4000]}",
+            f"image_url={url}\nfile={out_path}\nbytes={len(body)}",
+        )
 
     await async_run_with_key_rotation(_run, what="OpenAI 文生图")
 
@@ -74,7 +81,14 @@ async def _generate_image_sd_webui(prompt: str, out_path: Path) -> None:
     raw = images[0]
     if "," in raw and raw.strip().startswith("data:"):
         raw = raw.split(",", 1)[1]
-    out_path.write_bytes(base64.b64decode(raw))
+    img_bytes = base64.b64decode(raw)
+    out_path.write_bytes(img_bytes)
+    print_model_io(
+        "SD WebUI txt2img",
+        f"POST {url}\nprompt=\n{full_prompt}\nsteps={settings.sd_steps} "
+        f"size={settings.sd_width}x{settings.sd_height} cfg={settings.sd_cfg_scale}",
+        f"file={out_path}\nbytes={len(img_bytes)}",
+    )
 
 
 async def generate_images_for_scenes(scenes: list[dict], out_dir: Path) -> list[Path]:

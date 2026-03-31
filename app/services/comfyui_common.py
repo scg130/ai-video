@@ -7,6 +7,8 @@ from typing import Any
 
 import httpx
 
+from app.services.model_debug_io import print_model_io
+
 DRAMA_STYLE_PREFIX = "古风修仙，斩仙台，电影质感，竖屏，中国风，短剧，"
 
 
@@ -139,6 +141,15 @@ async def run_workflow_save_output(
         if data.get("node_errors"):
             raise RuntimeError(f"ComfyUI workflow 节点错误: {data['node_errors']}")
 
+        def _write_and_log(blob: bytes) -> None:
+            out_path.write_bytes(blob)
+            print_model_io(
+                timeout_label,
+                f"POST {base}/prompt\nworkflow_nodes={len(workflow)} "
+                f"client_id={client_id}\nprompt_id={prompt_id}",
+                f"file={out_path}\nbytes={len(blob)}",
+            )
+
         for _ in range(3600):
             await asyncio.sleep(2)
             hr = await client.get(f"{base}/history/{prompt_id}")
@@ -151,16 +162,16 @@ async def run_workflow_save_output(
                 for img in out.get("images") or []:
                     fn = img.get("filename", "")
                     if is_video_filename(fn):
-                        out_path.write_bytes(await download_view(client, base, img))
+                        _write_and_log(await download_view(client, base, img))
                         return
                 for vid in out.get("videos") or []:
-                    out_path.write_bytes(await download_view(client, base, vid))
+                    _write_and_log(await download_view(client, base, vid))
                     return
             for _node_id, out in outputs.items():
                 for img in out.get("images") or []:
                     fn = img.get("filename", "")
                     if fn.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
-                        out_path.write_bytes(await download_view(client, base, img))
+                        _write_and_log(await download_view(client, base, img))
                         return
 
         raise RuntimeError(f"{timeout_label} 执行超时，未在输出中找到视频或图片")
