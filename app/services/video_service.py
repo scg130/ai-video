@@ -1,10 +1,17 @@
 """自动剪辑：Ken Burns、xfade 转场、抖音风字幕、封面大字。"""
-import subprocess
+import logging
 import shutil
+import subprocess
 from pathlib import Path
 from typing import List, Optional
 
 from app.config import settings
+
+_log = logging.getLogger(__name__)
+
+
+def _compose_log(msg: str, *args: object) -> None:
+    _log.info("[合成视频] " + msg, *args)
 
 
 def _run_ffmpeg(args: list[str], cwd: Optional[Path] = None) -> None:
@@ -123,17 +130,30 @@ def build_video(
     use_kb = getattr(settings, "ffmpeg_ken_burns", True)
     use_xf = getattr(settings, "ffmpeg_xfade", True) and len(image_paths) > 1
     fade_d = float(getattr(settings, "ffmpeg_xfade_duration", 0.5))
+    total_d = sum(durs)
+    _compose_log(
+        "开始(静图模式) segments=%d 总时长约%.1fs → %s temp=%s ken_burns=%s xfade=%s",
+        len(image_paths),
+        total_d,
+        output_video,
+        temp_dir,
+        use_kb,
+        use_xf,
+    )
 
     segs: List[Path] = []
     for i, p in enumerate(image_paths):
         seg = temp_dir / f"kb_{i:03d}.mp4"
+        _compose_log("静图→片段 [%d/%d] %s %.1fs", i + 1, len(image_paths), p.name, durs[i])
         _image_to_segment_mp4(p, seg, durs[i], temp_dir, use_kb)
         segs.append(seg)
 
     video_no_audio = temp_dir / "video_no_audio.mp4"
     if use_xf:
+        _compose_log("视频轨拼接 xfade fade=%.2fs → %s", fade_d, video_no_audio.name)
         _xfade_concat_segments(segs, durs, video_no_audio, fade_d)
     else:
+        _compose_log("视频轨拼接 concat demuxer → %s", video_no_audio.name)
         _concat_demuxer_segments(segs, video_no_audio, temp_dir)
 
     voice_concat_list = temp_dir / "voice_list.txt"
@@ -147,9 +167,11 @@ def build_video(
                 _run_ffmpeg(["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-t", str(dur), "-q:a", "9", str(silent)])
                 f.write(f"file '{silent.absolute()}'\n")
     voice_merged = temp_dir / "voice_merged.mp3"
+    _compose_log("配音轨 concat → %s", voice_merged.name)
     _run_ffmpeg(["-f", "concat", "-safe", "0", "-i", str(voice_concat_list), "-c", "copy", str(voice_merged)])
 
     video_with_voice = temp_dir / "video_with_voice.mp4"
+    _compose_log("合并 画面+配音 → %s", video_with_voice.name)
     _run_ffmpeg([
         "-i", str(video_no_audio),
         "-i", str(voice_merged),
@@ -158,6 +180,7 @@ def build_video(
     ])
 
     video_with_subs = temp_dir / "video_with_subs.mp4"
+    _compose_log("烧录字幕 srt=%s → %s", srt_path.name, video_with_subs.name)
     _run_ffmpeg([
         "-i", str(video_with_voice),
         "-vf", _subtitle_filter_arg(srt_path),
@@ -166,6 +189,7 @@ def build_video(
     ])
 
     if bgm_path and bgm_path.exists():
+        _compose_log("混音 BGM %s → %s", bgm_path.name, output_video.name)
         _run_ffmpeg([
             "-i", str(video_with_subs),
             "-i", str(bgm_path),
@@ -174,8 +198,11 @@ def build_video(
             str(output_video),
         ])
     else:
+        _compose_log("无 BGM，复制为成片 → %s", output_video.name)
         shutil.copy2(video_with_subs, output_video)
 
+    if output_video.exists():
+        _compose_log("完成(静图) %s (%d bytes)", output_video, output_video.stat().st_size)
     return output_video
 
 
@@ -223,18 +250,30 @@ def build_video_from_clips(
     durs = segment_durations or [seconds_per_clip] * len(clip_paths)
     if len(durs) < len(clip_paths):
         durs.extend([seconds_per_clip] * (len(clip_paths) - len(durs)))
+    total_d = sum(durs)
+    use_xf = getattr(settings, "ffmpeg_xfade", True) and len(clip_paths) > 1
+    fade_d = float(getattr(settings, "ffmpeg_xfade_duration", 0.5))
+    _compose_log(
+        "开始(视频片段模式) clips=%d 总时长约%.1fs → %s temp=%s xfade=%s",
+        len(clip_paths),
+        total_d,
+        output_video,
+        temp_dir,
+        use_xf,
+    )
 
     normalized: List[Path] = []
     for i, p in enumerate(clip_paths):
         dur = durs[i] if i < len(durs) else seconds_per_clip
+        _compose_log("片段归一化 [%d/%d] %s %.1fs", i + 1, len(clip_paths), p.name, dur)
         normalized.append(_normalize_clip_to_duration(p, dur, temp_dir, i))
 
-    use_xf = getattr(settings, "ffmpeg_xfade", True) and len(normalized) > 1
-    fade_d = float(getattr(settings, "ffmpeg_xfade_duration", 0.5))
     video_no_audio = temp_dir / "clips_concat.mp4"
     if use_xf:
+        _compose_log("视频轨拼接 xfade fade=%.2fs → %s", fade_d, video_no_audio.name)
         _xfade_concat_segments(normalized, durs, video_no_audio, fade_d)
     else:
+        _compose_log("视频轨拼接 concat demuxer → %s", video_no_audio.name)
         _concat_demuxer_segments(normalized, video_no_audio, temp_dir)
 
     voice_concat_list = temp_dir / "voice_list.txt"
@@ -248,9 +287,11 @@ def build_video_from_clips(
                 _run_ffmpeg(["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-t", str(dur), "-q:a", "9", str(silent)])
                 f.write(f"file '{silent.absolute()}'\n")
     voice_merged = temp_dir / "voice_merged.mp3"
+    _compose_log("配音轨 concat → %s", voice_merged.name)
     _run_ffmpeg(["-f", "concat", "-safe", "0", "-i", str(voice_concat_list), "-c", "copy", str(voice_merged)])
 
     video_with_voice = temp_dir / "video_with_voice.mp4"
+    _compose_log("合并 画面+配音 → %s", video_with_voice.name)
     _run_ffmpeg([
         "-i", str(video_no_audio),
         "-i", str(voice_merged),
@@ -259,6 +300,7 @@ def build_video_from_clips(
     ])
 
     video_with_subs = temp_dir / "video_with_subs.mp4"
+    _compose_log("烧录字幕 srt=%s → %s", srt_path.name, video_with_subs.name)
     _run_ffmpeg([
         "-i", str(video_with_voice),
         "-vf", _subtitle_filter_arg(srt_path),
@@ -267,6 +309,7 @@ def build_video_from_clips(
     ])
 
     if bgm_path and bgm_path.exists():
+        _compose_log("混音 BGM %s → %s", bgm_path.name, output_video.name)
         _run_ffmpeg([
             "-i", str(video_with_subs),
             "-i", str(bgm_path),
@@ -275,8 +318,11 @@ def build_video_from_clips(
             str(output_video),
         ])
     else:
+        _compose_log("无 BGM，复制为成片 → %s", output_video.name)
         shutil.copy2(video_with_subs, output_video)
 
+    if output_video.exists():
+        _compose_log("完成(片段) %s (%d bytes)", output_video, output_video.stat().st_size)
     return output_video
 
 

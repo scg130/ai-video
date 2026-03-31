@@ -4,7 +4,10 @@ from pathlib import Path
 from typing import Any, Optional
 
 from app.config import settings
+from app.logging_setup import setup_app_logging
 from app.crud import history as hist
+
+setup_app_logging()
 from app.queue.job_store import create_job, set_completed, set_failed, set_running
 from app.services.pipeline_service import run_pipeline
 

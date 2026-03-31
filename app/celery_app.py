@@ -2,6 +2,9 @@
 from celery import Celery
 
 from app.config import settings
+from app.logging_setup import setup_app_logging
+
+setup_app_logging()
 
 celery_app = Celery(
     "ai_video",

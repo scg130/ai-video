@@ -138,6 +138,15 @@ class Settings(BaseSettings):
     output_dir: str = "./output"
     temp_dir: str = "./temp"
 
+    # 日志（app.* 写入 LOG_DIR，默认轮转；环境变量 LOG_DIR / LOG_LEVEL 等）
+    log_dir: str = "./logs"
+    log_filename: str = "app.log"
+    log_file_max_bytes: int = 10 * 1024 * 1024
+    log_file_backup_count: int = 5
+    log_level: str = "INFO"
+    log_to_file: bool = True
+    log_to_console: bool = True
+
     # Chroma
     chroma_persist_dir: str = "./chroma_db"
 

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import shutil
 import uuid
 from pathlib import Path
@@ -31,14 +32,16 @@ from app.services.comfyui_animatediff_service import generate_animatediff_clip a
 from app.services.video_service import (
     build_video,
     build_video_from_clips,
-    segment_durations_from_scenes,
     enhance_cover_with_title,
+    segment_durations_from_scenes,
 )
 from app.services.pipeline_service import (
     _cover_from_first_clip,
     _pipeline_tolerant,
     _promo_title_from_scenes,
 )
+
+_log = logging.getLogger(__name__)
 
 
 class DramaState(TypedDict, total=False):
@@ -219,6 +222,13 @@ async def node_media_img(state: DramaState) -> dict[str, Any]:
 
 
 async def node_assemble_clips(state: DramaState) -> dict[str, Any]:
+    jid = state.get("job_id", "")
+    _log.info(
+        "[合成视频] 节点 assemble_clips(视频片段) 开始 job_id=%s clips=%d → %s",
+        jid,
+        len(state.get("clip_paths") or []),
+        state.get("output_video"),
+    )
     clip_paths = [Path(p) for p in state["clip_paths"]]
     tts_paths: list[Optional[Path]] = [Path(p) if p else None for p in state["tts_paths"]]
     temp_dir = Path(state["temp_dir"])
@@ -235,10 +245,18 @@ async def node_assemble_clips(state: DramaState) -> dict[str, Any]:
         temp_dir=temp_dir,
         segment_durations=state["durs"],
     )
+    _log.info("[合成视频] 节点 assemble_clips 结束 job_id=%s", jid)
     return {}
 
 
 async def node_assemble_images(state: DramaState) -> dict[str, Any]:
+    jid = state.get("job_id", "")
+    _log.info(
+        "[合成视频] 节点 assemble_images(静图) 开始 job_id=%s images=%d → %s",
+        jid,
+        len(state.get("image_paths") or []),
+        state.get("output_video"),
+    )
     image_paths = [Path(p) for p in state["image_paths"]]
     tts_paths = [Path(p) if p else None for p in state["tts_paths"]]
     temp_dir = Path(state["temp_dir"])
@@ -256,6 +274,7 @@ async def node_assemble_images(state: DramaState) -> dict[str, Any]:
         temp_dir=temp_dir,
         segment_durations=state["durs"],
     )
+    _log.info("[合成视频] 节点 assemble_images 结束 job_id=%s", jid)
     return {}
 
 

@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 
 from app.config import settings
 from app.db import init_db
+from app.logging_setup import setup_app_logging
 from app.routers import drama
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -15,6 +16,7 @@ WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    setup_app_logging()
     settings.output_path.mkdir(parents=True, exist_ok=True)
     settings.temp_path.mkdir(parents=True, exist_ok=True)
     init_db()
