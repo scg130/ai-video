@@ -1,5 +1,6 @@
 """文生图：OpenAI DALL·E 或本地 SD（AUTOMATIC1111 WebUI API）。"""
 import base64
+import logging
 from pathlib import Path
 
 import httpx

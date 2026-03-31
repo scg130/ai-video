@@ -3,14 +3,23 @@ ComfyUI + CogVideoXWrapper 文生视频（本地）。
 需在 ComfyUI 中安装 https://github.com/kijai/ComfyUI-CogVideoXWrapper，
 导出 API 格式 workflow，配置 COGVIDEOX_WORKFLOW_PATH。
 """
+import logging
 from pathlib import Path
 
 from app.config import settings
 from app.services import comfyui_common as cc
 from app.services.visual_prompt import build_visual_prompt
 
+_log = logging.getLogger(__name__)
+
 
 async def generate_video_clip(prompt: str, out_path: Path, negative: str = "") -> None:
+    _log.info(
+        "[画面] CogVideoX 调用开始 base=%s → %s prompt前100字=%r",
+        settings.comfyui_base_url,
+        out_path.name,
+        (prompt[:100] + "…") if len(prompt) > 100 else prompt,
+    )
     wf = cc.load_workflow_json(settings.cogvideox_workflow_path, "COGVIDEOX_WORKFLOW_PATH")
     default_neg = settings.cogvideox_negative_default or settings.sd_negative_prompt
     w = cc.inject_prompts(
@@ -30,6 +39,8 @@ async def generate_video_clip(prompt: str, out_path: Path, negative: str = "") -
         client_id="ai-video-cogvideox",
         timeout_label="CogVideoX",
     )
+    sz = out_path.stat().st_size if out_path.exists() else 0
+    _log.info("[画面] CogVideoX 调用结束 %s bytes=%d", out_path.name, sz)
 
 
 async def generate_cogvideox_clips_for_scenes(scenes: list[dict], out_dir: Path) -> list[Path]:

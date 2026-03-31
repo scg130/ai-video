@@ -25,7 +25,7 @@ from app.services.script_service import (
 )
 from app.services.subtitle_service import to_srt
 from app.services.tts_service import generate_tts_for_scenes
-from app.services.image_service import generate_images_for_scenes
+from app.services.image_service import _use_sd_webui, generate_images_for_scenes
 from app.services.visual_prompt import build_visual_prompt
 from app.services.comfyui_cogvideox_service import generate_video_clip as cog_generate_clip
 from app.services.comfyui_animatediff_service import generate_animatediff_clip as ad_generate_clip
@@ -136,11 +136,24 @@ async def node_subtitles(state: DramaState) -> dict[str, Any]:
 
 
 def route_visual(state: DramaState) -> Literal["media_cog", "media_ad", "media_img"]:
-    v = state.get("visual", "images")
+    v = (state.get("visual") or "images").lower().strip()
+    jid = state.get("job_id", "")
     if v == "cogvideox":
+        _log.info(
+            "[画面] 路由 VISUAL_MODE=cogvideox → 节点 media_cog（ComfyUI 文生视频）job_id=%s",
+            jid,
+        )
         return "media_cog"
     if v == "animatediff":
+        _log.info(
+            "[画面] 路由 VISUAL_MODE=animatediff → 节点 media_ad（ComfyUI AnimateDiff）job_id=%s",
+            jid,
+        )
         return "media_ad"
+    _log.info(
+        "[画面] 路由 VISUAL_MODE=images → 节点 media_img（文生图）job_id=%s",
+        jid,
+    )
     return "media_img"
 
 
@@ -148,18 +161,46 @@ async def node_media_cog(state: DramaState) -> dict[str, Any]:
     temp_dir = Path(state["temp_dir"])
     scenes = state["scenes"]
     durs = state["durs"]
+    jid = state.get("job_id", "")
     neg = settings.sd_negative_prompt or settings.cogvideox_negative_default
+    _log.info(
+        "[画面] cogvideox 开始 job_id=%s 分镜数=%d comfyui=%s workflow=%s",
+        jid,
+        len(scenes),
+        settings.comfyui_base_url,
+        (settings.cogvideox_workflow_path or "")[:120] or "(未配置)",
+    )
 
     async def _cog_clips() -> list[Path]:
         out: list[Path] = []
         for i, s in enumerate(scenes):
             p = temp_dir / f"scene_{i:03d}.mp4"
+            vp = build_visual_prompt(s)
+            _log.info(
+                "[画面] cogvideox 分镜 [%d/%d] prompt前80字=%r → %s",
+                i + 1,
+                len(scenes),
+                (vp[:80] + "…") if len(vp) > 80 else vp,
+                p.name,
+            )
             try:
-                await cog_generate_clip(build_visual_prompt(s), p, negative=neg)
+                await cog_generate_clip(vp, p, negative=neg)
                 if not p.exists() or p.stat().st_size < 64:
                     raise RuntimeError("CogVideoX 输出无效")
-            except Exception:
+                _log.info(
+                    "[画面] cogvideox 分镜 [%d/%d] 完成 bytes=%d",
+                    i + 1,
+                    len(scenes),
+                    p.stat().st_size,
+                )
+            except Exception as e:
                 if _pipeline_tolerant():
+                    _log.warning(
+                        "[画面] cogvideox 分镜 [%d/%d] 失败，使用占位: %s",
+                        i + 1,
+                        len(scenes),
+                        e,
+                    )
                     placeholder_mp4(p, durs[i] if i < len(durs) else 5.0)
                 else:
                     raise
@@ -169,6 +210,12 @@ async def node_media_cog(state: DramaState) -> dict[str, Any]:
     tts_paths, clip_paths = await asyncio.gather(
         generate_tts_for_scenes(scenes, temp_dir),
         _cog_clips(),
+    )
+    _log.info(
+        "[画面] cogvideox 结束 job_id=%s 片段=%d TTS=%d",
+        jid,
+        len(clip_paths),
+        sum(1 for x in tts_paths if x),
     )
     return {
         "tts_paths": [str(x) if x else None for x in tts_paths],
@@ -180,18 +227,46 @@ async def node_media_ad(state: DramaState) -> dict[str, Any]:
     temp_dir = Path(state["temp_dir"])
     scenes = state["scenes"]
     durs = state["durs"]
+    jid = state.get("job_id", "")
     neg = settings.sd_negative_prompt
+    _log.info(
+        "[画面] animatediff 开始 job_id=%s 分镜数=%d comfyui=%s workflow=%s",
+        jid,
+        len(scenes),
+        settings.comfyui_base_url,
+        (settings.animatediff_workflow_path or "")[:120] or "(未配置)",
+    )
 
     async def _ad_clips() -> list[Path]:
         out: list[Path] = []
         for i, s in enumerate(scenes):
             p = temp_dir / f"scene_{i:03d}.mp4"
+            vp = build_visual_prompt(s)
+            _log.info(
+                "[画面] animatediff 分镜 [%d/%d] prompt前80字=%r → %s",
+                i + 1,
+                len(scenes),
+                (vp[:80] + "…") if len(vp) > 80 else vp,
+                p.name,
+            )
             try:
-                await ad_generate_clip(build_visual_prompt(s), p, negative=neg)
+                await ad_generate_clip(vp, p, negative=neg)
                 if not p.exists() or p.stat().st_size < 64:
                     raise RuntimeError("AnimateDiff 输出无效")
-            except Exception:
+                _log.info(
+                    "[画面] animatediff 分镜 [%d/%d] 完成 bytes=%d",
+                    i + 1,
+                    len(scenes),
+                    p.stat().st_size,
+                )
+            except Exception as e:
                 if _pipeline_tolerant():
+                    _log.warning(
+                        "[画面] animatediff 分镜 [%d/%d] 失败，使用占位: %s",
+                        i + 1,
+                        len(scenes),
+                        e,
+                    )
                     placeholder_mp4(p, durs[i] if i < len(durs) else 5.0)
                 else:
                     raise
@@ -202,6 +277,12 @@ async def node_media_ad(state: DramaState) -> dict[str, Any]:
         generate_tts_for_scenes(scenes, temp_dir),
         _ad_clips(),
     )
+    _log.info(
+        "[画面] animatediff 结束 job_id=%s 片段=%d TTS=%d",
+        jid,
+        len(clip_paths),
+        sum(1 for x in tts_paths if x),
+    )
     return {
         "tts_paths": [str(x) if x else None for x in tts_paths],
         "clip_paths": [str(p) for p in clip_paths],
@@ -211,9 +292,23 @@ async def node_media_ad(state: DramaState) -> dict[str, Any]:
 async def node_media_img(state: DramaState) -> dict[str, Any]:
     temp_dir = Path(state["temp_dir"])
     scenes = state["scenes"]
+    jid = state.get("job_id", "")
+    provider = "sd_webui" if _use_sd_webui() else "openai_dalle"
+    _log.info(
+        "[画面] images 开始 job_id=%s 分镜数=%d 文生图通道=%s",
+        jid,
+        len(scenes),
+        provider,
+    )
     tts_paths, image_paths = await asyncio.gather(
         generate_tts_for_scenes(scenes, temp_dir),
         generate_images_for_scenes(scenes, temp_dir),
+    )
+    _log.info(
+        "[画面] images 结束 job_id=%s 图片=%d TTS=%d",
+        jid,
+        len(image_paths),
+        sum(1 for x in tts_paths if x),
     )
     return {
         "tts_paths": [str(x) if x else None for x in tts_paths],

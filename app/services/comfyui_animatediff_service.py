@@ -14,14 +14,23 @@ ComfyUI + AnimateDiff 文生视频（本地）。
 
 配置 ANIMATEDIFF_WORKFLOW_PATH 指向导出的 API JSON。
 """
+import logging
 from pathlib import Path
 
 from app.config import settings
 from app.services import comfyui_common as cc
 from app.services.visual_prompt import build_visual_prompt
 
+_log = logging.getLogger(__name__)
+
 
 async def generate_animatediff_clip(prompt: str, out_path: Path, negative: str = "") -> None:
+    _log.info(
+        "[画面] AnimateDiff 调用开始 base=%s → %s prompt前100字=%r",
+        settings.comfyui_base_url,
+        out_path.name,
+        (prompt[:100] + "…") if len(prompt) > 100 else prompt,
+    )
     wf = cc.load_workflow_json(settings.animatediff_workflow_path, "ANIMATEDIFF_WORKFLOW_PATH")
     w = cc.inject_prompts(
         wf,
@@ -40,6 +49,8 @@ async def generate_animatediff_clip(prompt: str, out_path: Path, negative: str =
         client_id="ai-video-animatediff",
         timeout_label="AnimateDiff",
     )
+    sz = out_path.stat().st_size if out_path.exists() else 0
+    _log.info("[画面] AnimateDiff 调用结束 %s bytes=%d", out_path.name, sz)
 
 
 async def generate_animatediff_clips_for_scenes(scenes: list[dict], out_dir: Path) -> list[Path]:
