@@ -13,7 +13,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from app.config import settings
 from app.services import rag_service
 from app.services.model_debug_io import print_chat_model_io
-from app.services.openai_keys import run_with_key_rotation
+from app.services.openai_keys import openai_sdk_base_url_kwargs, run_with_key_rotation
 from app.services.visual_prompt import build_visual_prompt
 
 _ERR_LOCAL_SCENES_PARSE = (
@@ -986,6 +986,7 @@ def _invoke_openai_llm_with_429_backoff(system: str, user: str) -> str:
                     temperature=0.85,
                     timeout=120.0,
                     max_retries=0,
+                    **openai_sdk_base_url_kwargs(),
                 )
                 msg = llm.invoke([SystemMessage(content=system), HumanMessage(content=user)])
                 out = _message_content_as_str(msg)

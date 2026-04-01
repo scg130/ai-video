@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     # GPT（OPENAI_API_KEY 单 Key；OPENAI_API_KEYS 多 Key，逗号/空格/换行分隔，与单 Key 二选一或合并列表）
     openai_api_key: str = ""
     openai_api_keys: str = ""
+    # 官方默认 https://api.openai.com/v1；填代理/兼容网关根地址即可，未带 /v1 时会自动补上
+    openai_api_base_url: str = ""
     openai_script_model: str = "gpt-4o-mini"
 
     # 剧本：两步（大纲→分镜）+ 导演向 prompt
@@ -182,6 +184,10 @@ class Settings(BaseSettings):
             s = raw_mode.lower()
             if s in ("openai", "local", "openai_fallback_local"):
                 object.__setattr__(self, "script_llm_mode", s)
+
+        oabu = _nz("OPENAI_API_BASE_URL")
+        if oabu is not None:
+            object.__setattr__(self, "openai_api_base_url", oabu)
 
         bu = _nz("LOCAL_LLM_BASE_URL")
         if bu is not None:

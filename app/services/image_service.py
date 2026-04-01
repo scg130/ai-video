@@ -9,7 +9,7 @@ from openai import AsyncOpenAI
 from app.config import settings
 from app.services.media_fallback import placeholder_png
 from app.services.model_debug_io import print_model_io
-from app.services.openai_keys import async_run_with_key_rotation
+from app.services.openai_keys import async_run_with_key_rotation, openai_sdk_base_url_kwargs
 from app.services.visual_prompt import build_visual_prompt
 
 
@@ -27,7 +27,7 @@ async def _generate_image_openai(prompt: str, out_path: Path) -> None:
     full_prompt = prompt
 
     async def _run(api_key: str) -> None:
-        client = AsyncOpenAI(api_key=api_key)
+        client = AsyncOpenAI(api_key=api_key, **openai_sdk_base_url_kwargs())
         resp = await client.images.generate(
             model="dall-e-3",
             prompt=full_prompt[:4000],

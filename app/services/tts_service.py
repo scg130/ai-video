@@ -8,7 +8,7 @@ from openai import AsyncOpenAI
 
 from app.config import settings
 from app.services.model_debug_io import print_model_io
-from app.services.openai_keys import async_run_with_key_rotation
+from app.services.openai_keys import async_run_with_key_rotation, openai_sdk_base_url_kwargs
 
 # OpenAI TTS voice：主角低沉、反派偏锐、女主柔和、旁白中性
 ROLE_TO_VOICE = {
@@ -36,7 +36,7 @@ async def _tts_openai(
     tolerant = getattr(settings, "pipeline_fault_tolerant", True)
 
     async def _run(api_key: str) -> list[Path]:
-        client = AsyncOpenAI(api_key=api_key)
+        client = AsyncOpenAI(api_key=api_key, **openai_sdk_base_url_kwargs())
         paths: list[Path] = []
         for i, text in enumerate(texts):
             if not text or not text.strip():

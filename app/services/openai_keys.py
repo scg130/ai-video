@@ -22,6 +22,24 @@ _rr_lock = threading.Lock()
 _rr_start = 0
 
 
+def openai_api_base_url_normalized() -> str | None:
+    """
+    OpenAI 官方 SDK / LangChain 用的 base_url，须以 /v1 结尾。
+    未配置时返回 None（走 SDK 默认 https://api.openai.com/v1）。
+    """
+    u = (getattr(settings, "openai_api_base_url", None) or "").strip().rstrip("/")
+    if not u:
+        return None
+    if not u.lower().endswith("/v1"):
+        return f"{u}/v1"
+    return u
+
+
+def openai_sdk_base_url_kwargs() -> dict[str, str]:
+    b = openai_api_base_url_normalized()
+    return {"base_url": b} if b else {}
+
+
 def list_openai_keys() -> list[str]:
     """合并 OPENAI_API_KEYS（逗号/换行/空格分隔）与 OPENAI_API_KEY（单 Key，可与多 Key 同时使用）。"""
     keys: list[str] = []
