@@ -20,7 +20,7 @@ from app.services.media_fallback import placeholder_mp4
 from app.services.script_service import (
     generate_script,
     normalize_scenes_list,
-    qwen_configured,
+    qwen_fallback_enabled_for_script,
     script_llm_mode_is_local,
 )
 from app.services.subtitle_service import to_srt
@@ -106,11 +106,7 @@ async def node_load_script(state: DramaState) -> dict[str, Any]:
                 ),
             )
         except Exception:
-            if (
-                _pipeline_tolerant()
-                and qwen_configured()
-                and not script_llm_mode_is_local()
-            ):
+            if _pipeline_tolerant() and qwen_fallback_enabled_for_script():
                 scenes = await loop.run_in_executor(
                     None,
                     lambda: generate_script(

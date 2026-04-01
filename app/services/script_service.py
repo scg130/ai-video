@@ -13,7 +13,11 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from app.config import settings
 from app.services import rag_service
 from app.services.model_debug_io import print_chat_model_io
-from app.services.openai_keys import openai_sdk_base_url_kwargs, run_with_key_rotation
+from app.services.openai_keys import (
+    list_openai_keys,
+    openai_sdk_base_url_kwargs,
+    run_with_key_rotation,
+)
 from app.services.visual_prompt import build_visual_prompt
 
 _ERR_LOCAL_SCENES_PARSE = (
@@ -235,13 +239,17 @@ def expand_from_one_liner(
             }
         )
 
-    if not scenes_out and not qwen_only and qwen_configured() and not script_llm_mode_is_local():
+    if not scenes_out and not qwen_only and qwen_fallback_enabled_for_script():
         return expand_from_one_liner(line, style, duration, qwen_only=True)
     if not scenes_out:
         raise RuntimeError(
             "一句话扩写未得到任何分镜，请检查 LOCAL_LLM_* 与模型 JSON 输出"
             if script_llm_mode_is_local()
-            else "一句话扩写未得到任何分镜，请检查模型输出或 QWEN_* / 主模型配置后重试"
+            else (
+                "一句话扩写未得到任何分镜，请检查 OPENAI_* 与模型输出"
+                if list_openai_keys()
+                else "一句话扩写未得到任何分镜，请检查模型输出或 QWEN_* / 主模型配置后重试"
+            )
         )
 
     return {"script": script_text, "scenes": scenes_out}
@@ -1044,6 +1052,17 @@ def qwen_configured() -> bool:
     return _qwen_base_is_local(base)
 
 
+def qwen_fallback_enabled_for_script() -> bool:
+    """已配置 OpenAI Key 时不再用 Qwen 兜底；local 模式也不走 Qwen。"""
+    if script_llm_mode_is_local():
+        return False
+    if not qwen_configured():
+        return False
+    if list_openai_keys():
+        return False
+    return True
+
+
 def _invoke_qwen_llm(system: str, user: str) -> str:
     if not qwen_configured():
         raise RuntimeError(
@@ -1075,18 +1094,20 @@ def _invoke_qwen_llm(system: str, user: str) -> str:
 
 
 def _invoke_script_llm(system: str, user: str, *, qwen_only: bool = False) -> str:
-    """openai / openai_fallback_local：失败或空响应时可切 QWEN_*。local 模式不切 Qwen（避免同一 Ollama 被当「兜底」再打一遍）。"""
+    """openai / openai_fallback_local：失败或空响应时可切 QWEN_*（仅未配 OpenAI Key 时）。local 不切 Qwen。"""
+    if qwen_only and list_openai_keys():
+        qwen_only = False
     if qwen_only:
         return _invoke_qwen_llm(system, user)
     local_only = script_llm_mode_is_local()
     try:
         text = _invoke_llm(system, user)
     except Exception:
-        if qwen_configured() and not local_only:
+        if qwen_fallback_enabled_for_script():
             return _invoke_qwen_llm(system, user)
         raise
     if not (text or "").strip():
-        if qwen_configured() and not local_only:
+        if qwen_fallback_enabled_for_script():
             return _invoke_qwen_llm(system, user)
         if local_only:
             raise RuntimeError("本地剧本模型返回为空，请检查 Ollama 与 LOCAL_LLM_*")
@@ -1145,7 +1166,7 @@ def generate_script(
         scenes = _maybe_expand_underfilled_scenes(scenes, num_scenes, duration)
         scenes = _split_oversized_time_scenes(scenes, duration=duration)
         if not scenes:
-            if not qwen_only and qwen_configured() and not script_llm_mode_is_local():
+            if not qwen_only and qwen_fallback_enabled_for_script():
                 return generate_script(
                     theme,
                     style,
@@ -1159,7 +1180,11 @@ def generate_script(
             raise RuntimeError(
                 _ERR_LOCAL_SCENES_PARSE
                 if script_llm_mode_is_local()
-                else "未能解析出分镜，请重试或检查本地 Qwen/Ollama 与 QWEN_* 配置"
+                else (
+                    "未能解析出分镜，请重试或检查 OPENAI_* 与剧本模型输出"
+                    if list_openai_keys()
+                    else "未能解析出分镜，请重试或检查本地 Qwen/Ollama 与 QWEN_* 配置"
+                )
             )
         try:
             _save_script_memory(theme, style, series_id, ep, scenes, None)
@@ -1219,7 +1244,7 @@ def generate_script(
     scenes = _maybe_expand_underfilled_scenes(scenes, num_scenes, duration)
     scenes = _split_oversized_time_scenes(scenes, duration=duration)
     if not scenes:
-        if not qwen_only and qwen_configured() and not script_llm_mode_is_local():
+        if not qwen_only and qwen_fallback_enabled_for_script():
             return generate_script(
                 theme,
                 style,
@@ -1233,7 +1258,11 @@ def generate_script(
         raise RuntimeError(
             _ERR_LOCAL_SCENES_PARSE
             if script_llm_mode_is_local()
-            else "未能解析出分镜，请重试或检查本地 Qwen/Ollama 与 QWEN_* 配置"
+            else (
+                "未能解析出分镜，请重试或检查 OPENAI_* 与剧本模型输出"
+                if list_openai_keys()
+                else "未能解析出分镜，请重试或检查本地 Qwen/Ollama 与 QWEN_* 配置"
+            )
         )
 
     try:
