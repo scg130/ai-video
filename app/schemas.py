@@ -84,6 +84,18 @@ class DraftScriptResponse(BaseModel):
     message: Optional[str] = Field(default=None, description="失败简述；成功时一般为 null")
 
 
+class RagMaterialIngestRequest(BaseModel):
+    """写入 Chroma「资料」库，供剧本生成时语义检索。"""
+    text: str = Field(..., description="资料正文（设定、百科、梗概等）")
+    doc_id: str = Field(default="", description="可选固定 ID；留空则自动生成")
+    tags: str = Field(default="", description="可选标签，便于后续筛选（当前仅存元数据）")
+
+
+class RagMaterialIngestResponse(BaseModel):
+    ok: bool = Field(description="是否写入成功")
+    doc_id: str = Field(default="", description="实际使用的文档 ID")
+
+
 class OneLinerExpandRequest(BaseModel):
     """一句话扩写：剧本 + 分镜 + 每镜文生图 prompt + 配音文案。"""
     line: str = Field(..., description="一句话创意或梗概")

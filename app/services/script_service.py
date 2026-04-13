@@ -13,6 +13,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from app.config import settings
 from app.services import rag_service
 from app.services.model_debug_io import print_chat_model_io
+from app.services.script_context_chain import compose_script_rag_block
 from app.services.openai_keys import (
     list_openai_keys,
     openai_sdk_base_url_kwargs,
@@ -203,6 +204,9 @@ def expand_from_one_liner(
     duration = max(30, min(120, int(duration)))
     num_scenes = _num_scenes_for_duration(duration)
     prompt = _one_liner_prompt(line, style, duration, num_scenes)
+    rag_prefix = compose_script_rag_block(line, style, series_id=None, episode=1)
+    if rag_prefix:
+        prompt = rag_prefix.strip() + "\n\n" + prompt
     content = _invoke_script_llm(DIRECTOR_SYSTEM, prompt, qwen_only=qwen_only)
     obj = _parse_json_object(content)
     script_text = str(obj.get("script") or "").strip()
@@ -980,6 +984,51 @@ def _invoke_local_llm(system: str, user: str) -> str:
     return out
 
 
+def _mamba_configured() -> bool:
+    base = (getattr(settings, "mamba_base_url", None) or "").strip()
+    model = (getattr(settings, "mamba_model", None) or "").strip()
+    return bool(base and model)
+
+
+def _invoke_mamba_llm(system: str, user: str) -> str:
+    """OpenAI 兼容长上下文端点（vLLM / 自建网关托管 Mamba 等）。"""
+    if not _mamba_configured():
+        raise RuntimeError("未配置 MAMBA_BASE_URL / MAMBA_MODEL，无法用 mamba 模式生成剧本")
+    system = (
+        f"{system}\n\n【输出】只输出纯 JSON，不要用 markdown 代码块，不要「好的」等开场白。"
+        "键名与字符串必须用英文双引号。"
+    )
+    user = (
+        f"{user}\n\n【再次强调】分镜须为合法 JSON：优先输出数组 [...] ，每项含 "
+        "time、scene、camera、dialogue、emotion、role；若只能输出对象，则用 "
+        '{{"scenes":[...]}} 把数组放在 scenes 字段。'
+        " scene 必须是字符串，不得为数组；条数与 num_scenes 一致；"
+        "除首镜可 0-3s 外每镜 time 跨度约 4～6 秒，禁止单镜超过 8 秒。"
+    )
+    base = settings.mamba_base_url.strip().rstrip("/")
+    timeout = float(getattr(settings, "mamba_timeout_sec", 300.0) or 300.0)
+    max_out = int(getattr(settings, "mamba_max_output_tokens", 8192) or 8192)
+    key = (settings.mamba_api_key or "").strip() or "not-needed"
+    llm = ChatOpenAI(
+        model=settings.mamba_model.strip(),
+        api_key=key,
+        base_url=base,
+        temperature=0.85,
+        timeout=timeout,
+        max_retries=0,
+        max_tokens=max_out,
+    )
+    msg = llm.invoke([SystemMessage(content=system), HumanMessage(content=user)])
+    out = _message_content_as_str(msg)
+    print_chat_model_io(
+        f"Mamba/长上下文剧本 base={base} model={settings.mamba_model.strip()}",
+        system,
+        user,
+        out,
+    )
+    return out
+
+
 def _invoke_openai_llm_with_429_backoff(system: str, user: str) -> str:
     max_r = max(1, int(getattr(settings, "script_openai_429_max_retries", 4)))
     base_delay = float(getattr(settings, "script_openai_429_base_delay_sec", 2.0))
@@ -1019,6 +1068,15 @@ def _invoke_openai_llm_with_429_backoff(system: str, user: str) -> str:
 
 def _invoke_llm(system: str, user: str) -> str:
     mode = (getattr(settings, "script_llm_mode", "openai") or "openai").lower().strip()
+    if mode == "openai_fallback_mamba":
+        try:
+            return _invoke_openai_llm_with_429_backoff(system, user)
+        except Exception:
+            if _mamba_configured():
+                return _invoke_mamba_llm(system, user)
+            raise
+    if mode == "mamba":
+        return _invoke_mamba_llm(system, user)
     # 完整匹配 openai_fallback_local 须先于 local（避免日后误用子串判断踩坑）
     if mode == "openai_fallback_local":
         try:
@@ -1135,17 +1193,9 @@ def generate_script(
     syn_sec = _synopsis_section(synopsis)
     ser_sec = _series_section(series_id, episode)
     ep = max(1, int(episode))
-    rag_block = ""
-    if rag_context:
-        rag_block = "\n\n" + rag_context
-    elif getattr(settings, "rag_enabled", True):
-        sid = (series_id or "").strip()
-        if sid:
-            ctx = rag_service.get_story_context(sid, ep)
-            if ctx:
-                rag_block = "\n\n" + ctx
-        else:
-            rag_block = "\n\n" + rag_service.query_context(theme, style)
+    rag_block = compose_script_rag_block(
+        theme, style, series_id=series_id, episode=ep, rag_context=rag_context
+    )
 
     if not getattr(settings, "script_two_step", True):
         content = _invoke_script_llm(

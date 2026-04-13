@@ -1,12 +1,15 @@
 """Chroma 剧情记忆：系列短剧参考与写入（含连续剧 series_id + episode）。"""
 import time
 from pathlib import Path
+from typing import Optional
 
 from app.config import settings
 
 _COLLECTION = "drama_series"
+_COLLECTION_MATERIALS = "drama_materials"
 _client = None
 _coll = None
+_coll_materials = None
 
 # 检索上下文上限（字符）
 RAG_CONTEXT_MAX_CHARS = 2000
@@ -28,6 +31,29 @@ def _collection():
     return _coll
 
 
+def _materials_collection(*, for_query: bool = False):
+    """独立「资料」集合：设定/百科/梗概等，与连续剧记忆分库存储。
+    for_query=True 时还要求 RAG_MATERIALS_ENABLED（写入可在关闭检索时仍执行）。"""
+    global _client, _coll_materials
+    if not getattr(settings, "rag_enabled", True):
+        return None
+    if for_query and not getattr(settings, "rag_materials_enabled", True):
+        return None
+    if _coll_materials is not None:
+        return _coll_materials
+    try:
+        import chromadb
+    except ImportError:
+        return None
+    persist = str(Path(settings.chroma_persist_dir).absolute())
+    if _client is None:
+        _client = chromadb.PersistentClient(path=persist)
+    _coll_materials = _client.get_or_create_collection(
+        _COLLECTION_MATERIALS, metadata={"hnsw:space": "cosine"}
+    )
+    return _coll_materials
+
+
 def query_context(theme: str, style: str, top_k: int = 3) -> str:
     c = _collection()
     if c is None:
@@ -40,6 +66,51 @@ def query_context(theme: str, style: str, top_k: int = 3) -> str:
         return "【系列/历史剧情参考，可延续人设与伏笔，勿照搬】\n" + "\n---\n".join(docs)
     except Exception:
         return ""
+
+
+def query_materials(theme: str, style: str, top_k: Optional[int] = None) -> str:
+    """
+    从「资料」库语义检索与题材/风格相关的片段，供剧本生成时参考。
+    """
+    c = _materials_collection(for_query=True)
+    if c is None:
+        return ""
+    k = top_k if top_k is not None else int(getattr(settings, "rag_materials_top_k", 5) or 5)
+    k = max(1, min(k, 30))
+    max_chars = int(getattr(settings, "rag_materials_max_chars", 1500) or 1500)
+    try:
+        r = c.query(query_texts=[f"{theme} {style}"], n_results=k)
+        docs = (r.get("documents") or [[]])[0]
+        if not docs:
+            return ""
+        text = "\n---\n".join(docs)
+        text = text[:max_chars]
+        return f"【参考资料（检索片段，勿照搬）】\n{text}"
+    except Exception:
+        return ""
+
+
+def add_material_document(
+    text: str,
+    doc_id: Optional[str] = None,
+    *,
+    tags: str = "",
+) -> tuple[bool, str]:
+    """写入一条资料（设定、大纲、百科等），供 query_materials 检索。成功返回 (True, doc_id)。"""
+    c = _materials_collection(for_query=False)
+    if c is None or not (text or "").strip():
+        return False, ""
+    uid = (doc_id or "").strip() or f"mat_{int(time.time() * 1000)}"
+    meta = {"tags": (tags or "")[:500]}
+    try:
+        c.add(
+            ids=[uid],
+            documents=[text.strip()[:50000]],
+            metadatas=[meta],
+        )
+        return True, uid
+    except Exception:
+        return False, ""
 
 
 def get_story_context(series_id: str, episode: int, top_k: int = 4) -> str:

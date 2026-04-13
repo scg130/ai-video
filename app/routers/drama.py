@@ -20,9 +20,12 @@ from app.schemas import (
     OneLinerExpandRequest,
     OneLinerExpandResponse,
     PublicStatusResponse,
+    RagMaterialIngestRequest,
+    RagMaterialIngestResponse,
 )
 from app.services.openai_keys import OpenAIAllKeysFailedError, OpenAINoKeysError
 from app.services.pipeline_service import run_pipeline
+from app.services import rag_service
 from app.services.script_service import expand_from_one_liner, generate_script, normalize_scenes_list
 
 
@@ -133,6 +136,22 @@ async def api_script_from_one_liner(req: OneLinerExpandRequest):
                 "message": str(e),
             },
         ) from e
+
+
+@router.post("/rag/material", response_model=RagMaterialIngestResponse)
+async def api_rag_material_ingest(req: RagMaterialIngestRequest):
+    """
+    写入剧本「参考资料」到 Chroma（独立集合），生成剧本时会与连续剧记忆一并检索注入。
+    需 RAG_ENABLED=true；若未安装 chromadb 则写入失败。
+    """
+    loop = asyncio.get_event_loop()
+
+    def _run() -> tuple[bool, str]:
+        uid = (req.doc_id or "").strip() or None
+        return rag_service.add_material_document(req.text, doc_id=uid, tags=req.tags)
+
+    ok, uid_out = await loop.run_in_executor(None, _run)
+    return RagMaterialIngestResponse(ok=ok, doc_id=uid_out)
 
 
 @router.post("/generate_video", response_model=GenerateApiResponse)

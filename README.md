@@ -43,9 +43,11 @@ cp .env.example .env
 |------|------|
 | `OPENAI_API_KEY` | 至少配置其一：单 Key，用于 GPT 剧本、OpenAI TTS、DALL·E |
 | `OPENAI_API_KEYS` | 可选：多 Key（逗号/空格/换行分隔），与单 Key 合并去重；请求**轮询起始 Key**，401/403/429 时**自动换 Key** 重试 |
-| `SCRIPT_LLM_MODE` | `openai`（默认）\|`local`\|`openai_fallback_local`（OpenAI 全失败后试本地） |
-| `SCRIPT_LLM_MODE_STRICT` | 默认 false：项目根 `.env` 中的 `SCRIPT_LLM_MODE`、`LOCAL_LLM_*`、`QWEN_*` **覆盖** shell 里已 `export` 的同名字段。设 `true` 时以环境变量为准（适合容器注入） |
+| `SCRIPT_LLM_MODE` | `openai`（默认）\|`local`\|`openai_fallback_local`\|`mamba`\|`openai_fallback_mamba`；`mamba` 走 `MAMBA_*`（OpenAI 兼容，适合 vLLM 托管 Mamba 等长上下文模型） |
+| `SCRIPT_LLM_MODE_STRICT` | 默认 false：项目根 `.env` 中的 `SCRIPT_LLM_MODE`、`LOCAL_LLM_*`、`QWEN_*`、`MAMBA_*` **覆盖** shell 里已 `export` 的同名字段。设 `true` 时以环境变量为准（适合容器注入） |
 | `LOCAL_LLM_BASE_URL` / `LOCAL_LLM_MODEL` | 本地 OpenAI 兼容端点，如 Ollama：`http://127.0.0.1:11434/v1` + `llama3.2` |
+| `MAMBA_BASE_URL` / `MAMBA_MODEL` | 长上下文剧本端点（须带 `/v1` 或与 OpenAI 兼容的根 URL）；`MAMBA_API_KEY` 可选；`MAMBA_MAX_OUTPUT_TOKENS` 默认 8192 |
+| `RAG_MATERIALS_*` | `RAG_MATERIALS_ENABLED`：是否检索「资料」库；`RAG_MATERIALS_TOP_K` / `RAG_MATERIALS_MAX_CHARS`：资料片段条数与长度上限 |
 | `SCRIPT_OPENAI_429_MAX_RETRIES` / `SCRIPT_OPENAI_429_BASE_DELAY_SEC` | 剧本调用 OpenAI 遇 429 时，同一 Key 指数退避重试后再换 Key |
 | `PIPELINE_FAULT_TOLERANT` | 默认 true：TTS/图/视频单镜失败时用静音或占位，尽量仍合成成片 |
 | `QUEUE_MAX_CONCURRENT` | 内存队列并发（`USE_CELERY=false`），默认 **1**（任务严格排队逐个跑）；Celery 模式需在 worker 侧用 `-c 1` 若也要串行 |
@@ -71,6 +73,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - **Web 控制台**：http://localhost:8000/（`web/index.html`：**故事简介** → **生成剧本**（可编辑 JSON）→ **生成视频** → 轮询 / 视频墙）  
 - API 文档：http://localhost:8000/docs  
 - **推荐交互流程**：`POST /api/script/draft`（主题、风格、时长、简介）→ 用户编辑 `script` → `POST /api/generate_video`（同上 + `script` 数组）→ `GET /api/status/{job_id}`（`status === "done"`）→ `GET /api/history`  
+- **参考资料入库**：`POST /api/rag/material`（`text` + 可选 `doc_id` / `tags`），与连续剧记忆一起在生成剧本时检索  
 - **一键异步（不写简介、不编辑剧本）**：`POST /api/generate` → `GET /api/status/{job_id}` → `GET /api/history`  
 - **同步**：`POST /api/generate_short_drama`（长耗时，易超时）  
 - **兼容**：`POST /api/jobs` → `GET /api/jobs/{job_id}`  
@@ -85,7 +88,8 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | **两步剧本** | `SCRIPT_TWO_STEP=true`：先大纲（钩子+节奏），再分镜 |
 | **防 429 + 本地剧本** | `SCRIPT_LLM_MODE=openai_fallback_local` + `LOCAL_LLM_BASE_URL`（如 Ollama `/v1`）：OpenAI 429 时同 Key 退避（`SCRIPT_OPENAI_429_*`），失败再切本地；`local` 可仅用本地 |
 | **流水线容错** | `PIPELINE_FAULT_TOLERANT=true`：单段 TTS 失败→静音；单张图失败→占位图；CogVideoX/AnimateDiff 单镜失败→黑场占位；剧本生成仍失败→模板分镜 |
-| **RAG** | `RAG_ENABLED=true`：Chroma 检索历史剧情并写入本集摘要，利于系列续写 |
+| **RAG + 资料** | `RAG_ENABLED=true`：Chroma **连续剧记忆**（`drama_series`）+ **资料库**（`drama_materials`，可用 `POST /api/rag/material` 写入）；`app/services/script_context_chain.py` 用 LangChain `Runnable` 编排检索块再注入剧本 prompt |
+| **Mamba-2 / 长上下文** | `SCRIPT_LLM_MODE=mamba` + `MAMBA_*` 指向 OpenAI 兼容服务；**本地部署**见 [docs/mamba2_local_deploy.md](docs/mamba2_local_deploy.md)（vLLM + `MAMBA_BASE_URL=http://127.0.0.1:8000/v1`）；`openai_fallback_mamba` 为 OpenAI 失败后再试 Mamba |
 | **统一画面 Prompt** | `app/services/visual_prompt.py`：仙侠电影感 + scene/emotion/camera + cinematic 4k |
 | **多角色 TTS** | `role`→OpenAI 声线：主角 onyx、反派 echo、女主 shimmer 等（可接 GPT-SoVITS / CosyVoice 扩展内部 API） |
 | **FFmpeg** | Ken Burns（`FFMPEG_KEN_BURNS`）、片段间 `xfade`（`FFMPEG_XFADE`）、抖音风字幕样式 |
@@ -252,7 +256,8 @@ ai-video/
 │   │   └── drama.py         # 同步 /api/jobs /api/jobs/{id}
 │   └── services/
 │       ├── script_service.py   # 两步剧本 + 导演 prompt
-│       ├── rag_service.py      # Chroma 系列记忆
+│       ├── rag_service.py      # Chroma：连续剧 + 资料库
+│       ├── script_context_chain.py  # LangChain：RAG 块编排
 │       ├── visual_prompt.py    # 统一画面 prompt
 │       ├── subtitle_service.py
 │       ├── tts_service.py      # 多角色 TTS

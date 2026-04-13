@@ -34,7 +34,8 @@ class Settings(BaseSettings):
 
     # 剧本：两步（大纲→分镜）+ 导演向 prompt
     script_two_step: bool = True
-    # 剧本 LLM：openai | local | openai_fallback_local（OpenAI 失败再试本地）
+    # 剧本 LLM：openai | local | openai_fallback_local | mamba | openai_fallback_mamba
+    # mamba：OpenAI 兼容长上下文端点（如 vLLM 托管 Mamba，见 MAMBA_*）
     script_llm_mode: str = "openai"
     # true：LLM 相关以系统环境变量为准（pydantic 默认，适合 Docker/K8s）
     # false（默认）：从 cwd 下 .env 回写 SCRIPT_LLM_MODE、LOCAL_LLM_*、QWEN_*（避免 shell 里旧 export 盖住 .env）
@@ -60,11 +61,21 @@ class Settings(BaseSettings):
     qwen_script_model: str = "qwen:0.5b"
     qwen_timeout_sec: float = 180.0
 
+    # Mamba / 长上下文：OpenAI 兼容 Chat Completions（vLLM、自建网关等）
+    mamba_base_url: str = ""
+    mamba_model: str = ""
+    mamba_api_key: str = ""
+    mamba_timeout_sec: float = 300.0
+    mamba_max_output_tokens: int = 8192
+
     # 流水线容错：单镜图/音/视频失败时用占位，尽量仍导出成片
     pipeline_fault_tolerant: bool = True
 
-    # RAG / Chroma 系列记忆
+    # RAG / Chroma 系列记忆 + 资料库（独立集合 drama_materials）
     rag_enabled: bool = True
+    rag_materials_enabled: bool = True
+    rag_materials_top_k: int = 5
+    rag_materials_max_chars: int = 1500
 
     # 画面 Prompt 后缀（文生图 / Comfy 共用）
     visual_prompt_suffix: str = ""
@@ -182,7 +193,7 @@ class Settings(BaseSettings):
         raw_mode = _nz("SCRIPT_LLM_MODE")
         if raw_mode is not None:
             s = raw_mode.lower()
-            if s in ("openai", "local", "openai_fallback_local"):
+            if s in ("openai", "local", "openai_fallback_local", "mamba", "openai_fallback_mamba"):
                 object.__setattr__(self, "script_llm_mode", s)
 
         oabu = _nz("OPENAI_API_BASE_URL")
@@ -237,6 +248,48 @@ class Settings(BaseSettings):
         if qt is not None:
             try:
                 object.__setattr__(self, "qwen_timeout_sec", float(qt))
+            except ValueError:
+                pass
+
+        mb = _nz("MAMBA_BASE_URL")
+        if mb is not None:
+            object.__setattr__(self, "mamba_base_url", mb)
+        mm = _nz("MAMBA_MODEL")
+        if mm is not None:
+            object.__setattr__(self, "mamba_model", mm)
+        mak = _nz("MAMBA_API_KEY")
+        if mak is not None:
+            object.__setattr__(self, "mamba_api_key", mak)
+        mto = _nz("MAMBA_TIMEOUT_SEC")
+        if mto is not None:
+            try:
+                object.__setattr__(self, "mamba_timeout_sec", float(mto))
+            except ValueError:
+                pass
+        mxt = _nz("MAMBA_MAX_OUTPUT_TOKENS")
+        if mxt is not None:
+            try:
+                object.__setattr__(self, "mamba_max_output_tokens", int(mxt))
+            except ValueError:
+                pass
+
+        rme = _nz("RAG_MATERIALS_ENABLED")
+        if rme is not None:
+            object.__setattr__(
+                self,
+                "rag_materials_enabled",
+                rme.lower() in ("1", "true", "yes", "on"),
+            )
+        rmtk = _nz("RAG_MATERIALS_TOP_K")
+        if rmtk is not None:
+            try:
+                object.__setattr__(self, "rag_materials_top_k", int(rmtk))
+            except ValueError:
+                pass
+        rmmc = _nz("RAG_MATERIALS_MAX_CHARS")
+        if rmmc is not None:
+            try:
+                object.__setattr__(self, "rag_materials_max_chars", int(rmmc))
             except ValueError:
                 pass
 
